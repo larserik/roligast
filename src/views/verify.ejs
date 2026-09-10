@@ -1,0 +1,32 @@
+<%- include("partials/header", { title: t("verify_title") }) %>
+
+<div class="form-box auth-box">
+  <h1><%= t("verify_title") %></h1>
+  <p class="lead"><%- t("verify_intro", { email: "<strong>" + email.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]) + "</strong>" }) %></p>
+  <% if (error) { %><p class="error"><%= error %></p><% } %>
+
+  <form action="/verify" method="post" class="stacked">
+    <input type="hidden" name="email" value="<%= email %>">
+    <input type="hidden" name="next" value="<%= next %>">
+    <% if (remember) { %><input type="hidden" name="remember" value="1"><% } %>
+    <label for="pin"><%= t("field_pin") %></label>
+    <input id="pin" name="pin" type="text" inputmode="numeric" pattern="[0-9]{6}"
+           maxlength="6" required autofocus autocomplete="one-time-code"
+           class="pin-input" placeholder="123456">
+    <button class="btn btn-primary btn-lg" type="submit"
+            data-loading-text="<%= t("signing_in") %>"><%= t("sign_in") %></button>
+  </form>
+
+  <div class="auth-alt">
+    <form action="/login" method="post" class="inline-form">
+      <input type="hidden" name="email" value="<%= email %>">
+      <input type="hidden" name="next" value="<%= next %>">
+      <% if (remember) { %><input type="hidden" name="remember" value="1"><% } %>
+      <button class="link-button" type="submit"
+              data-loading-text="<%= t("resending_code") %>"><%= t("resend_code") %></button>
+    </form>
+    <a class="link-button" href="/login?next=<%= encodeURIComponent(next) %>"><%= t("use_other_email") %></a>
+  </div>
+</div>
+
+<%- include("partials/footer") %>

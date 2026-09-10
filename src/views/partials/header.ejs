@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="<%= lang %>">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title ? title + " – " + t("site_name") : t("site_name") + " – " + t("site_tagline") %></title>
+  <meta name="description" content="<%= typeof description !== 'undefined' && description ? description : t('meta_description') %>">
+  <link rel="stylesheet" href="<%= asset("styles.css") %>">
+  <link rel="icon" href="<%= asset("logo.svg") %>" type="image/svg+xml">
+  <meta name="theme-color" content="#e4572e">
+  <meta property="og:site_name" content="<%= t("site_name") %>">
+  <meta property="og:title" content="<%= title || t("site_tagline") %>">
+  <meta property="og:type" content="website">
+</head>
+<body>
+<a class="skip-link" href="#main"><%= t("read_more") %></a>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="logo" href="/">
+      <img src="<%= asset("logo.svg") %>" alt="" width="34" height="34">
+      <span><%= t("site_name") %></span>
+    </a>
+    <nav class="nav">
+      <a class="btn btn-primary" href="/add"><%= t("nav_add") %></a>
+      <% if (user) { %>
+        <a class="nav-link<%= path === "/me" ? " is-current" : "" %>" href="/me"><%= t("nav_mine") %></a>
+        <form action="/logout" method="post" class="inline-form">
+          <input type="hidden" name="next" value="<%= currentUrl %>">
+          <button class="nav-link nav-button" type="submit"><%= t("nav_logout") %></button>
+        </form>
+      <% } else { %>
+        <a class="nav-link" href="/login?next=<%= encodeURIComponent(currentUrl) %>"><%= t("nav_login") %></a>
+      <% } %>
+      <a class="lang-switch" href="/lang/<%= otherLang %>?next=<%= encodeURIComponent(currentUrl) %>"
+         title="<%= t("lang_other_title") %>" lang="<%= otherLang %>"><%= t("lang_other") %></a>
+    </nav>
+  </div>
+</header>
+<main class="container" id="main">

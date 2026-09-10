@@ -1,0 +1,37 @@
+<%- include("partials/header", { title: t("add_title") }) %>
+
+<div class="form-box">
+  <h1><%= t("add_title") %></h1>
+  <p class="lead"><%= t("add_intro") %></p>
+  <% if (error) { %><p class="error"><%= error %></p><% } %>
+
+  <form action="/add" method="post" class="stacked">
+    <label for="title"><%= t("field_title") %></label>
+    <input id="title" name="title" type="text" required maxlength="120" autofocus
+           value="<%= values.title %>" placeholder="<%= t("field_title_ph") %>">
+
+    <label for="body"><%= t("field_body") %></label>
+    <textarea id="body" name="body" rows="7" maxlength="5000"
+              placeholder="<%= t("field_body_ph") %>"><%= values.body %></textarea>
+
+    <label for="url"><%= t("field_url") %></label>
+    <input id="url" name="url" type="url" inputmode="url" autocapitalize="none"
+           autocorrect="off" spellcheck="false" value="<%= values.url %>"
+           placeholder="<%= t("field_url_ph") %>">
+    <p class="help"><%= t("field_url_help") %></p>
+
+    <% if (user) { %>
+      <p class="help"><%= t("field_name_help_user") %>
+        <a href="/me"><%= t("me_display_name") %></a></p>
+    <% } else { %>
+      <label for="name"><%= t("field_name") %></label>
+      <input id="name" name="name" type="text" maxlength="40"
+             value="<%= values.name %>" placeholder="<%= t("field_name_ph") %>">
+    <% } %>
+
+    <button class="btn btn-primary btn-lg" type="submit"
+            data-loading-text="<%= t("submitting_post") %>"><%= t("submit_post") %></button>
+  </form>
+</div>
+
+<%- include("partials/footer") %>

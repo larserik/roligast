@@ -1,0 +1,32 @@
+networks:
+  nginx-network:
+    name: nginx-network
+    external: true
+
+services:
+  roligast:
+    build: .
+    container_name: roligast
+    restart: unless-stopped
+    # No host port bindings - the port is only reachable inside the network,
+    # where the nginx reverse proxy terminates SSL and forwards to
+    # http://roligast:3000
+    expose:
+      - "3000"
+    networks:
+      - nginx-network
+    # NODE_ENV, PORT and DATABASE_PATH come from the Dockerfile. SMTP settings
+    # are read from .env; without SMTP_HOST the login code is written to the
+    # container log instead, which is handy during development.
+    environment:
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      - roligast-data:/data
+
+volumes:
+  roligast-data:

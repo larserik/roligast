@@ -1,0 +1,52 @@
+<%
+  // mode: "card" on the lists (cheap - a picture at most), "full" on the post
+  // page (the real player).
+  const m = media;
+%>
+<% if (!m) { %>
+<% } else if (mode === "card") { %>
+  <% if (m.kind === "image") { %>
+    <a class="media media-image" href="/p/<%= post.public_id %>">
+      <img src="<%= m.src %>" alt="" loading="lazy" referrerpolicy="no-referrer">
+    </a>
+  <% } else if (m.thumbnail) { %>
+    <a class="media media-thumb" href="/p/<%= post.public_id %>">
+      <img src="<%= m.thumbnail %>" alt="" loading="lazy" referrerpolicy="no-referrer">
+      <span class="play-badge" aria-hidden="true">▶</span>
+    </a>
+  <% } else if (m.kind === "video") { %>
+    <a class="media media-chip" href="/p/<%= post.public_id %>">
+      <span class="play-badge" aria-hidden="true">▶</span>
+      <span><%= m.host %></span>
+    </a>
+  <% } else { %>
+    <a class="media media-chip" href="/p/<%= post.public_id %>">
+      <span class="link-badge" aria-hidden="true">↗</span>
+      <span><%= m.host %></span>
+    </a>
+  <% } %>
+<% } else { %>
+  <% if (m.kind === "image") { %>
+    <figure class="media-full">
+      <a href="<%= m.url %>" target="_blank" rel="noopener nofollow ugc">
+        <img src="<%= m.src %>" alt="<%= post.title %>" referrerpolicy="no-referrer">
+      </a>
+    </figure>
+  <% } else if (m.provider === "file") { %>
+    <figure class="media-full">
+      <video src="<%= m.src %>" controls preload="metadata" playsinline></video>
+    </figure>
+  <% } else if (m.embedUrl) { %>
+    <%# The ratio caps the width as well as shaping the box, so a tall clip is
+        narrow rather than tall enough to push the rating bar off screen. %>
+    <div class="media-embed" style="--ratio: <%= m.ratio || "16 / 9" %>;">
+      <iframe src="<%= m.embedUrl %>" title="<%= post.title %>" loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+  <% } %>
+  <p class="media-source">
+    <a href="<%= m.url %>" target="_blank" rel="noopener nofollow ugc"><%= t("open_original") %> ↗</a>
+    <span class="media-host"><%= m.host %></span>
+  </p>
+<% } %>

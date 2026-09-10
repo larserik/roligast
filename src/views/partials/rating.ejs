@@ -1,0 +1,29 @@
+<%
+  const isCompact = !!locals.compact;
+  const avg = formatAverage(post.rating_sum, post.rating_count);
+%>
+<div class="rating<%= isCompact ? " is-compact" : "" %>" data-rating data-post="<%= post.public_id %>">
+  <div class="rating-head">
+    <span class="score<%= post.rating_count ? "" : " is-empty" %>" data-score aria-label="<%= avg ? avg + " " + t("rating_of_ten") : t("rating_none") %>">
+      <strong data-average><%= avg || "–" %></strong><span class="score-max">/10</span>
+    </span>
+    <span class="rating-count" data-count><%= post.rating_count ? ratingSummary(post.rating_count) : t("rating_none") %></span>
+  </div>
+  <form class="rating-form" method="post" action="/p/<%= post.public_id %>/rate">
+    <input type="hidden" name="next" value="<%= currentUrl %>">
+    <div class="rating-scale" role="group" aria-label="<%= t("rate_prompt") %>">
+      <% for (let n = 1; n <= 10; n++) { %>
+        <button type="submit" name="value" value="<%= n %>"
+                class="rate-btn<%= post.my_rating === n ? " is-chosen" : "" %>"
+                aria-pressed="<%= post.my_rating === n ? "true" : "false" %>"><%= n %></button>
+      <% } %>
+    </div>
+  </form>
+  <p class="rating-status" data-status data-error="<%= t("rate_error") %>">
+    <% if (post.my_rating) { %>
+      <%= t("your_rating", { value: post.my_rating }) %> · <%= t("rate_change") %>
+    <% } else { %>
+      <%= isCompact ? t("rate_prompt_short") : t("rate_prompt") %>
+    <% } %>
+  </p>
+</div>

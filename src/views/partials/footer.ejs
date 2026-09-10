@@ -1,0 +1,14 @@
+</main>
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <p><%= t("footer_about") %></p>
+    <p class="footer-links">
+      <a href="/"><%= t("back_home") %></a>
+      <a href="/add"><%= t("footer_add") %></a>
+      <a href="/lang/<%= otherLang %>?next=<%= encodeURIComponent(currentUrl) %>" lang="<%= otherLang %>"><%= t("lang_other") %></a>
+    </p>
+  </div>
+</footer>
+<script src="<%= asset("app.js") %>" defer></script>
+</body>
+</html>

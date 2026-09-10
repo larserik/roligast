@@ -1,0 +1,20 @@
+<%
+  const m = media(post);
+  const excerpt = (post.body || "").length > 260
+    ? post.body.slice(0, 260).trimEnd() + " …"
+    : post.body || "";
+%>
+<article class="card kind-<%= post.kind %>">
+  <a class="card-title" href="/p/<%= post.public_id %>"><%= post.title %></a>
+  <% if (m) { %><%- include("media", { post, media: m, mode: "card" }) %><% } %>
+  <% if (excerpt) { %>
+    <p class="card-body"><%= excerpt %></p>
+  <% } %>
+  <p class="card-meta">
+    <span class="kind-tag"><%= t("kind_" + post.kind + "_one") %></span>
+    <span><%= t("by_author", { name: authorName(post) }) %></span>
+    <span>·</span>
+    <time datetime="<%= post.created_at %>"><%= formatWhen(post.created_at) %></time>
+  </p>
+  <%- include("rating", { post, compact: true }) %>
+</article>

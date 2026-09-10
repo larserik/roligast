@@ -1,0 +1,54 @@
+<%- include("partials/header", { title: post.title, description: (post.body || post.title).slice(0, 200) }) %>
+<% const m = media(post); %>
+
+<article class="post">
+  <p class="crumbs"><a href="/">← <%= t("back_home") %></a></p>
+  <h1><%= post.title %></h1>
+  <div class="post-top">
+    <p class="card-meta">
+      <span class="kind-tag"><%= t("kind_" + post.kind + "_one") %></span>
+      <span><%= t("by_author", { name: authorName(post) }) %></span>
+      <span>·</span>
+      <time datetime="<%= post.created_at %>"><%= formatWhen(post.created_at) %></time>
+    </p>
+    <%# Up here rather than under the clip: a row of its own between the video
+        and the rating bar is a row a laptop screen cannot spare. %>
+    <p class="post-actions">
+      <button class="btn btn-quiet btn-sm" type="button" data-copy="<%= post.public_id %>"
+              data-copied="<%= t("share_copied") %>"><%= t("share_copy") %></button>
+      <% if (mine) { %>
+        <form action="/p/<%= post.public_id %>/delete" method="post" class="inline-form"
+              data-confirm="<%= t("delete_confirm") %>">
+          <input type="hidden" name="next" value="/">
+          <button class="btn btn-quiet btn-sm btn-danger" type="submit"><%= t("delete_post") %></button>
+        </form>
+      <% } %>
+    </p>
+  </div>
+
+  <% if (m) { %><%- include("partials/media", { post, media: m, mode: "full" }) %><% } %>
+
+  <% if (post.body) { %>
+    <div class="post-body"><%= post.body %></div>
+  <% } %>
+
+</article>
+
+<%# Outside the article on purpose: sticking to the bottom of the window only
+    works for as long as the element's own container is still on screen, and
+    this way that container is the whole page. A long joke can be scrolled
+    with the ten buttons still in reach. %>
+<section class="rating-panel">
+  <%- include("partials/rating", { post }) %>
+</section>
+
+<% if (more.length) { %>
+  <h2 class="section-heading"><%= t("sort_hot") %></h2>
+  <div class="grid">
+    <% more.forEach(function (post) { %>
+      <%- include("partials/post-card", { post }) %>
+    <% }); %>
+  </div>
+<% } %>
+
+<%- include("partials/footer") %>

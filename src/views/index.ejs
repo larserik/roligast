@@ -1,0 +1,62 @@
+<%- include("partials/header", { title: null }) %>
+<%
+  // Changing the sort keeps the filter and vice versa; both start over at the
+  // first page.
+  const listUrl = (changes) => {
+    const params = new URLSearchParams();
+    const next = { sort, kind, ...changes };
+    if (next.sort && next.sort !== "top") params.set("sort", next.sort);
+    if (next.kind) params.set("kind", next.kind);
+    if (next.page && next.page > 1) params.set("page", next.page);
+    const query = params.toString();
+    return query ? "/?" + query : "/";
+  };
+%>
+
+<% if (page === 1) { %>
+<section class="hero">
+  <h1><%= t("hero_title") %></h1>
+  <p><%= t("hero_sub") %></p>
+  <a class="btn btn-primary btn-lg" href="/add"><%= t("nav_add") %></a>
+</section>
+<% } %>
+
+<nav class="toolbar" aria-label="<%= t("sort_top") %>">
+  <div class="tabs">
+    <% for (const option of ["top", "hot", "new"]) { %>
+      <a class="tab<%= sort === option ? " is-current" : "" %>"
+         href="<%= listUrl({ sort: option, page: 1 }) %>"><%= t("sort_" + option) %></a>
+    <% } %>
+  </div>
+  <div class="chips">
+    <a class="chip<%= kind ? "" : " is-current" %>" href="<%= listUrl({ kind: null, page: 1 }) %>"><%= t("filter_all") %></a>
+    <% for (const option of ["joke", "clip", "image", "link"]) { %>
+      <a class="chip<%= kind === option ? " is-current" : "" %>"
+         href="<%= listUrl({ kind: option, page: 1 }) %>"><%= t("kind_" + option) %></a>
+    <% } %>
+  </div>
+</nav>
+
+<% if (posts.length === 0) { %>
+  <div class="empty">
+    <h2><%= t("empty_title") %></h2>
+    <p><%= total > 0 && kind ? t("empty_body") : t("empty_body") %></p>
+    <a class="btn btn-primary" href="/add"><%= t("empty_cta") %></a>
+  </div>
+<% } else { %>
+  <div class="grid">
+    <% posts.forEach(function (post) { %>
+      <%- include("partials/post-card", { post }) %>
+    <% }); %>
+  </div>
+  <nav class="pager">
+    <% if (page > 1) { %>
+      <a class="btn" href="<%= listUrl({ page: page - 1 }) %>">←</a>
+    <% } %>
+    <% if (hasMore) { %>
+      <a class="btn" href="<%= listUrl({ page: page + 1 }) %>">→</a>
+    <% } %>
+  </nav>
+<% } %>
+
+<%- include("partials/footer") %>

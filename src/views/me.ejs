@@ -1,0 +1,41 @@
+<%- include("partials/header", { title: t("me_title") }) %>
+
+<div class="form-box">
+  <h1><%= t("me_title") %></h1>
+  <p class="lead"><%= t("me_signed_in_as", { email: user.email }) %></p>
+  <% if (error) { %><p class="error"><%= error %></p><% } %>
+  <% if (saved) { %><p class="notice"><%= t("me_saved") %></p><% } %>
+
+  <form action="/me" method="post" class="stacked inline-stacked">
+    <label for="display_name"><%= t("me_display_name") %></label>
+    <input id="display_name" name="display_name" type="text" maxlength="40"
+           value="<%= user.display_name || "" %>">
+    <p class="help"><%= t("me_display_name_help", { fallback: user.public_id }) %></p>
+    <button class="btn" type="submit" data-loading-text="<%= t("me_saving") %>"><%= t("me_save") %></button>
+  </form>
+</div>
+
+<h2 class="section-heading"><%= t("me_posts") %></h2>
+<% if (posts.length === 0) { %>
+  <p class="muted"><%= t("me_no_posts") %></p>
+<% } else { %>
+  <div class="grid">
+    <% posts.forEach(function (post) { %>
+      <%- include("partials/post-card", { post }) %>
+    <% }); %>
+  </div>
+<% } %>
+
+<h2 class="section-heading"><%= t("me_ratings") %></h2>
+<% if (rated.length === 0) { %>
+  <p class="muted"><%= t("me_no_ratings") %></p>
+<% } else { %>
+  <div class="grid">
+    <% rated.forEach(function (post) { %>
+      <%- include("partials/post-card", { post }) %>
+    <% }); %>
+  </div>
+<% } %>
+<p class="muted small"><%= t("me_local_note") %></p>
+
+<%- include("partials/footer") %>
