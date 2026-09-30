@@ -173,6 +173,11 @@ app.use((req, res, next) => {
   // The language switch and the sign-out button send the visitor back to the
   // page they were on.
   res.locals.currentUrl = req.originalUrl;
+  // On the sign-in pages themselves the link carries no next at all, which is
+  // what stops it growing a longer one every time it is followed.
+  res.locals.loginHref = AUTH_PATHS.has(req.path)
+    ? "/login"
+    : "/login?next=" + encodeURIComponent(req.originalUrl);
   next();
 });
 
@@ -185,9 +190,25 @@ const loginContext = (req) => ({
   hasVisitorCookie: req.hadVisitorCookie,
 });
 
+// Pages that exist to get someone signed in. Coming back to one of them after
+// signing in is never what was wanted.
+const AUTH_PATHS = new Set(["/login", "/verify", "/logout"]);
+
 // Only allows redirects back into this site. A browser reads "//evil.se" and
 // "/\evil.se" as absolute URLs, so a plain leading slash is not enough.
-const safeNext = (next) => (/^\/($|[^/\\])/.test(next || "") ? next : "/");
+//
+// A next pointing back at the sign-in pages is refused as well. The header used
+// to build each sign-in link out of the address of the page it appeared on, so
+// following one from /login gave /login?next=/login, then ?next=/login?next=...
+// - an endless supply of new addresses for anything that follows links, each
+// one longer than the last.
+const safeNext = (next) => {
+  const value = next || "";
+  if (!/^\/($|[^/\\])/.test(value) || value.length > 512) return "/";
+  const path = value.split("?")[0];
+  if (AUTH_PATHS.has(path) || path.startsWith("/lang/")) return "/";
+  return value;
+};
 
 // --- Language switch -------------------------------------------------------
 app.get("/lang/:code", (req, res) => {
@@ -593,6 +614,16 @@ app.post("/me", requireUser, (req, res) => {
 
 // --- Odds and ends ---------------------------------------------------------
 app.get("/healthz", (req, res) => res.type("text").send("ok"));
+
+// Signing in is not something to index, and neither is the language switch,
+// which exists only to set a cookie and send the visitor back.
+app.get("/robots.txt", (req, res) =>
+  res
+    .type("text")
+    .send(
+      ["User-agent: *", "Disallow: /login", "Disallow: /verify", "Disallow: /lang/", ""].join("\n")
+    )
+);
 
 app.use((req, res) => {
   res.status(404).render("404", { title: res.locals.t("not_found_title") });
