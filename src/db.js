@@ -63,6 +63,24 @@ db.exec(`
     PRIMARY KEY (post_id, rater_key)
   );
 
+  -- Every step of a sign-in, kept whether or not it worked. The tables above
+  -- are deliberately forgetful - a pin row is deleted the moment it is spent
+  -- and pruned once it expires - which leaves no way to see who has been
+  -- asking for codes. This is that record.
+  CREATE TABLE IF NOT EXISTS login_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    event TEXT NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    detail TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_login_events_created ON login_events(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_login_events_email ON login_events(email, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_login_events_ip ON login_events(ip, created_at DESC);
+
   CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_posts_score ON posts(score DESC, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_posts_kind ON posts(kind, created_at DESC);

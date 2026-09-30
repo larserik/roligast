@@ -24,6 +24,7 @@ import {
   sessionMiddleware,
   requireUser,
   pruneExpired,
+  recordLoginEvent,
 } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,8 +33,10 @@ const app = express();
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 // The reverse proxy in front of this terminates TLS, so the real protocol and
-// client address arrive in X-Forwarded-* headers.
-app.set("trust proxy", true);
+// client address arrive in X-Forwarded-* headers. One hop, not "true": trusting
+// every hop makes req.ip the leftmost X-Forwarded-For entry, which is whatever
+// the client put there. Counting one hop takes the address nginx itself saw.
+app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
 // Static files first, so serving them costs no session lookup or database work.
@@ -166,6 +169,12 @@ app.use((req, res, next) => {
   // page they were on.
   res.locals.currentUrl = req.originalUrl;
   next();
+});
+
+// What the sign-in log records about a request beyond the address typed in.
+const loginContext = (req) => ({
+  ip: req.ip,
+  userAgent: req.get("user-agent"),
 });
 
 // Only allows redirects back into this site. A browser reads "//evil.se" and
@@ -436,7 +445,10 @@ app.post("/login", async (req, res) => {
       next,
     });
 
-  if (!isValidEmail(email)) return showLogin("err_email_invalid");
+  if (!isValidEmail(email)) {
+    recordLoginEvent(email, "invalid_email", loginContext(req));
+    return showLogin("err_email_invalid");
+  }
 
   // The remembered address is kept apart from the session so that signing out,
   // or a session running out, still leaves the login form filled in.
@@ -448,7 +460,7 @@ app.post("/login", async (req, res) => {
 
   let result;
   try {
-    result = await requestPin(email, req.lang);
+    result = await requestPin(email, req.lang, loginContext(req));
   } catch (err) {
     console.error("[login] could not send the code:", err);
     return showLogin("err_generic", 500);
@@ -472,6 +484,7 @@ app.post("/verify", (req, res) => {
   const next = safeNext(req.body.next);
 
   if (!isValidEmail(email)) {
+    recordLoginEvent(email, "invalid_email", loginContext(req));
     return res.status(400).render("login", {
       title: t("login_title"),
       error: t("err_email_invalid"),
@@ -481,7 +494,7 @@ app.post("/verify", (req, res) => {
     });
   }
 
-  const result = verifyPin(email, pin);
+  const result = verifyPin(email, pin, loginContext(req));
   if (!result.ok) {
     return res.status(400).render("verify", {
       title: t("verify_title"),
