@@ -21,6 +21,9 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY src ./src
+# The log reader runs inside the container, where the database and
+# better-sqlite3 already are: node scripts/logins.js
+COPY scripts ./scripts
 
 RUN mkdir -p /data && chown -R node:node /data /app
 USER node

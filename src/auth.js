@@ -11,10 +11,6 @@ const SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 // A user agent is logged to tell a browser from a script, not to fingerprint
 // anyone, so only the front of it is kept.
 const USER_AGENT_MAX = 200;
-// Long enough to see a pattern, short enough that an address and the addresses
-// it was requested from do not sit on disk indefinitely.
-const EVENT_RETENTION_DAYS = 90;
-
 const insertEvent = db.prepare(
   "INSERT INTO login_events (email, event, ip, user_agent, detail) VALUES (?, ?, ?, ?, ?)"
 );
@@ -182,7 +178,8 @@ export function pruneExpired() {
   const now = Date.now();
   db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
   db.prepare("DELETE FROM login_pins WHERE expires_at <= ?").run(now);
-  db.prepare(
-    `DELETE FROM login_events WHERE created_at < datetime('now', '-${EVENT_RETENTION_DAYS} days')`
-  ).run();
+  // login_events is deliberately not touched: an abuse pattern is only visible
+  // over a long run, and a row is a few dozen bytes. "scripts/logins.js size"
+  // reports what it is holding, and its prune command is there to be run by
+  // hand if it ever needs it.
 }

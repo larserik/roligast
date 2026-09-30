@@ -56,6 +56,9 @@ src/
   mailer.js   the sign-in code email
   views/      EJS templates
   public/     stylesheet, a little progressive-enhancement JavaScript, the logo
+scripts/
+  logins.js   reads the sign-in log; runs inside the container
+  logins.sh   the same thing, without typing the docker part
 ```
 
 Everything works without JavaScript: rating is an ordinary form post that
@@ -87,31 +90,26 @@ form filled in; unticking it clears the cookie.
 
 `login_pins` holds only codes that are still live - a row is deleted the moment
 its code is used and pruned once it expires - so it is no use for seeing who has
-been asking. `login_events` is the record: one row per step, kept for 90 days.
-The events are `invalid_email`, `throttled`, `requested`, `sent`, `send_failed`,
-`wrong_code`, `expired`, `too_many` and `verified`.
+been asking. `login_events` is the record: one row per step. The events are
+`invalid_email`, `throttled`, `requested`, `sent`, `send_failed`, `wrong_code`,
+`expired`, `too_many` and `verified`.
 
-There is no `sqlite3` binary in the image, so queries go through node:
+`scripts/logins.sh` reads it in the running container:
 
 ```sh
-# the last 50 events
-docker compose exec roligast node -e "
-const db = require('better-sqlite3')(process.env.DATABASE_PATH);
-console.table(db.prepare('SELECT id, email, event, ip, detail, created_at FROM login_events ORDER BY id DESC LIMIT 50').all());
-"
-
-# where the traffic comes from, last 7 days
-docker compose exec roligast node -e "
-const db = require('better-sqlite3')(process.env.DATABASE_PATH);
-console.table(db.prepare(\"SELECT ip, COUNT(*) AS events, COUNT(DISTINCT email) AS addresses, SUM(event='sent') AS mails_sent, SUM(event='verified') AS signed_in, MAX(created_at) AS last_seen FROM login_events WHERE created_at > datetime('now','-7 days') GROUP BY ip ORDER BY mails_sent DESC\").all());
-"
-
-# addresses that were mailed a code and never once signed in
-docker compose exec roligast node -e "
-const db = require('better-sqlite3')(process.env.DATABASE_PATH);
-console.table(db.prepare(\"SELECT email, COUNT(*) AS codes_sent, GROUP_CONCAT(DISTINCT ip) AS ips, MAX(created_at) AS last_sent FROM login_events WHERE event='sent' AND email NOT IN (SELECT email FROM login_events WHERE event='verified') GROUP BY email ORDER BY codes_sent DESC\").all());
-"
+./scripts/logins.sh                  # everything at a glance, last 7 days
+./scripts/logins.sh ips 30           # where the traffic came from
+./scripts/logins.sh unverified 0     # sent a code, never signed in, all time
+./scripts/logins.sh email a@b.se     # everything for one address
+./scripts/logins.sh ip 45.9.148.99   # everything from one client
+./scripts/logins.sh daily            # day by day, for spotting a burst
+./scripts/logins.sh size             # rows, bytes, how fast it is growing
+./scripts/logins.sh help             # the rest
 ```
+
+Pass `0` for days to mean all time. Against a database on this machine rather
+than in the container, run the same commands as
+`DATABASE_PATH=./data/roligast.db node scripts/logins.js ...`.
 
 One IP with many addresses and no `verified` is the shape to watch for: the
 sign-in form will mail a code to any address submitted, and every bounce from a
@@ -119,11 +117,22 @@ dead address is charged against the sending reputation of `info@roligast.com`.
 There is still no per-IP limit on requesting a code - the log is there to show
 what the limit should be.
 
+**Nothing deletes these events.** A row costs about 400 bytes with its indexes,
+measured over 100,000 of them, so a million is around 380 MB. `size` reports what
+the table is holding and projects the current rate forward. If it ever does need
+cutting back, that is a decision to take by hand:
+
+```sh
+./scripts/logins.sh prune 365          # says how many would go, deletes nothing
+./scripts/logins.sh prune 365 --yes    # actually deletes, then vacuums
+```
+
 `req.ip` is the address nginx saw, because `trust proxy` counts one hop rather
 than trusting the whole `X-Forwarded-For` chain (with `true`, Express takes the
 leftmost entry, which the client writes). If every row shows the same `172.x`
 address, nginx is not passing `X-Forwarded-For` and its `proxy_set_header` needs
 fixing before the column means anything.
+
 
 ## Notes
 
