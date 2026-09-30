@@ -11,13 +11,15 @@
 
 import Database from "better-sqlite3";
 import fs from "node:fs";
+import { refreshTorExits, isTorExit, reverseDns } from "../src/network.js";
 
 const dbPath = process.env.DATABASE_PATH || "./data/roligast.db";
 if (!fs.existsSync(dbPath)) {
   console.error(`No database at ${dbPath}. Set DATABASE_PATH if it lives elsewhere.`);
   process.exit(1);
 }
-const db = new Database(dbPath, { readonly: process.argv[2] !== "prune" });
+const WRITES = new Set(["prune", "enrich"]);
+const db = new Database(dbPath, { readonly: !WRITES.has(process.argv[2]) });
 
 const [, , rawCommand, ...args] = process.argv;
 const command = rawCommand || "overview";
@@ -34,6 +36,14 @@ const since = (n) => (n > 0 ? `datetime('now', '-${n} days')` : "'0000-01-01'");
 const window = (n) => (n > 0 ? `the last ${n} days` : "all time");
 
 const heading = (text) => console.log(`\n${text}\n${"-".repeat(text.length)}`);
+
+// Rows written before the referer, cookie and network columns existed have
+// has_visitor_cookie NULL, and nothing written since does. That is the marker
+// for "never recorded", which must not be read as "absent".
+const OLD_ROW = "has_visitor_cookie IS NULL";
+// No browser sends a User-Agent wrapped in double quotes. Tooling that pastes a
+// quoted string straight into the header does.
+const QUOTED_UA = `user_agent LIKE '"%"'`;
 const show = (rows, empty = "nothing recorded") =>
   rows.length ? console.table(rows) : console.log(`  (${empty})`);
 
@@ -48,10 +58,12 @@ const bytes = (n) => {
 const recent = (limit) =>
   db
     .prepare(
-      `SELECT id, created_at, email, event, ip, network,
+      `SELECT id, created_at, email, event, ip,
+              CASE WHEN ${OLD_ROW} AND network IS NULL THEN '?' ELSE COALESCE(network, '-') END AS network,
               CASE has_visitor_cookie WHEN 1 THEN 'yes' WHEN 0 THEN 'NO' ELSE '?' END AS cookie,
-              CASE WHEN has_visitor_cookie IS NULL THEN '?'
+              CASE WHEN ${OLD_ROW} THEN '?'
                    WHEN referer IS NULL THEN 'NO' ELSE 'yes' END AS referer,
+              CASE WHEN ${QUOTED_UA} THEN 'quoted' ELSE '' END AS ua,
               detail
        FROM login_events ORDER BY id DESC LIMIT ?`
     )
@@ -122,13 +134,16 @@ const automated = (n) =>
               COUNT(*) AS events, COUNT(DISTINCT email) AS addresses,
               SUM(event = 'sent') AS mails_sent,
               SUM(event = 'verified') AS signed_in,
-              SUM(COALESCE(has_visitor_cookie, 0) = 0) AS no_cookie,
-              SUM(referer IS NULL) AS no_referer,
+              SUM(has_visitor_cookie = 0) AS no_cookie,
+              SUM(has_visitor_cookie IS NOT NULL AND referer IS NULL) AS no_referer,
+              SUM(${QUOTED_UA}) AS quoted_ua,
               MAX(accept_language) AS accept_language,
               MAX(user_agent) AS user_agent
        FROM login_events
        WHERE created_at > ${since(n)}
-         AND (network = 'tor' OR COALESCE(has_visitor_cookie, 1) = 0 OR referer IS NULL)
+         AND (network = 'tor' OR ${QUOTED_UA}
+              OR has_visitor_cookie = 0
+              OR (has_visitor_cookie IS NOT NULL AND referer IS NULL))
        GROUP BY ip ORDER BY events DESC`
     )
     .all();
@@ -136,13 +151,15 @@ const automated = (n) =>
 const networks = (n) =>
   db
     .prepare(
-      `SELECT COALESCE(network, 'ordinary') AS network,
+      `SELECT CASE WHEN network IS NOT NULL THEN network
+                   WHEN ${OLD_ROW} THEN 'not recorded'
+                   ELSE 'ordinary' END AS network,
               COUNT(*) AS events, COUNT(DISTINCT ip) AS ips,
               COUNT(DISTINCT email) AS addresses,
               SUM(event = 'sent') AS mails_sent,
               SUM(event = 'verified') AS signed_in
        FROM login_events WHERE created_at > ${since(n)}
-       GROUP BY COALESCE(network, 'ordinary') ORDER BY events DESC`
+       GROUP BY 1 ORDER BY events DESC`
     )
     .all();
 
@@ -262,6 +279,40 @@ const commands = {
     show(recent(15));
   },
 
+  full() {
+    const limit = Number(positional[0]) || 30;
+    heading(`The last ${limit} events, every column`);
+    show(
+      db
+        .prepare(
+          `SELECT id, created_at, email, event, ip,
+                  CASE WHEN ${OLD_ROW} AND network IS NULL THEN '?' ELSE COALESCE(network, '-') END AS network,
+                  COALESCE(rdns, '-') AS rdns,
+                  CASE has_visitor_cookie WHEN 1 THEN 'yes' WHEN 0 THEN 'NO' ELSE '?' END AS cookie,
+                  CASE WHEN ${OLD_ROW} THEN '?' WHEN referer IS NULL THEN 'NO'
+                       ELSE replace(replace(referer, 'https://', ''), 'http://', '') END AS referer,
+                  COALESCE(accept_language, '-') AS lang,
+                  COALESCE(detail, '') AS detail,
+                  CASE WHEN ${QUOTED_UA} THEN 'quoted ' ELSE '' END ||
+                    COALESCE(substr(replace(user_agent, '"', ''), 1, 38), '-') AS user_agent
+           FROM login_events ORDER BY id DESC LIMIT ?`
+        )
+        .all(limit)
+    );
+    console.log("  user_agent is cut at 38 characters; logins.js show <id> for one event in full.");
+  },
+
+  show() {
+    const id = Number(positional[0]);
+    if (!id) return console.error("Which event? logins.js show 25");
+    const row = db.prepare("SELECT * FROM login_events WHERE id = ?").get(id);
+    if (!row) return console.error(`No event with id ${id}.`);
+    heading(`Event ${id}`);
+    for (const [field, value] of Object.entries(row)) {
+      console.log(`  ${field.padEnd(19)} ${value === null ? "(null)" : value}`);
+    }
+  },
+
   recent() {
     const limit = Number(positional[0]) || 50;
     heading(`The last ${limit} events`);
@@ -374,6 +425,43 @@ const commands = {
   size,
   prune: () => prune(Number(positional[0])),
 
+  // Rows written before the network and rdns columns existed have nothing in
+  // them. The address is still there, so both can be worked out after the fact.
+  async enrich() {
+    const pending = db
+      .prepare(
+        `SELECT DISTINCT ip FROM login_events
+         WHERE ip IS NOT NULL AND (rdns IS NULL OR network IS NULL)`
+      )
+      .all()
+      .map((row) => row.ip);
+    if (pending.length === 0) return console.log("Nothing left to fill in.");
+
+    console.log(`Looking up ${pending.length} addresses …`);
+    await refreshTorExits();
+
+    const setRdns = db.prepare(
+      "UPDATE login_events SET rdns = ? WHERE ip = ? AND rdns IS NULL"
+    );
+    const setTor = db.prepare(
+      "UPDATE login_events SET network = 'tor' WHERE ip = ? AND network IS NULL"
+    );
+
+    let named = 0;
+    let tor = 0;
+    for (const ip of pending) {
+      const hostname = await reverseDns(ip);
+      if (hostname) named += setRdns.run(hostname, ip).changes;
+      // Only ever set 'tor', never 'ordinary': an address absent from today's
+      // list may still have been an exit when the request came in, and saying
+      // so either way would be inventing history.
+      if (isTorExit(ip)) tor += setTor.run(ip).changes;
+    }
+    console.log(
+      `Named ${named} rows from reverse DNS, marked ${tor} as coming over Tor.`
+    );
+  },
+
   help() {
     console.log(`
 Reads the sign-in log in ${dbPath}
@@ -383,7 +471,9 @@ Reads the sign-in log in ${dbPath}
   ips [days]           where the traffic came from
   unverified [days]    addresses sent a code that never signed in (default 30)
   daily [days]         day by day, for spotting a burst (default 30)
-  bots [days]          Tor exits, and requests with no cookie or no referer
+  full [n]             every column for the last n events (default 30)
+  show <id>            one event, every field, nothing truncated
+  bots [days]          Tor exits, quoted user agents, missing cookie or referer
   networks [days]      how much came over Tor rather than an ordinary line
   recent [n]           the last n events (default 50)
   email <address>      everything recorded for one address
@@ -391,6 +481,7 @@ Reads the sign-in log in ${dbPath}
   users                accounts, with their posts, ratings and live sessions
   pending              codes that are still live
   size                 rows, bytes on disk and how fast it is growing
+  enrich               fill in network and reverse DNS on rows that predate them
   prune <days> --yes   delete events older than that. Nothing else ever deletes
 
 Pass 0 for days to mean all time. Events: invalid_email, throttled, requested,
@@ -405,4 +496,4 @@ if (!run) {
   commands.help();
   process.exit(1);
 }
-run();
+await run();

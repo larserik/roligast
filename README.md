@@ -102,8 +102,18 @@ when the address is on the Tor Project's published exit list (refreshed every si
 hours; a failed refresh keeps the previous list). The reverse lookup happens
 after the row is written, so nobody waits on it.
 
-A browser that filled in the form has a cookie and a referer. Something posting
-straight at `/login` has neither - `bots` is the view for that.
+The cookie and the referer were meant to tell a browser from a script, and for a
+while they did. The traffic then started arriving with both, so on their own they
+prove nothing; what it has not managed to fake is its `User-Agent`, which arrives
+wrapped in literal double quotes. No browser does that. `bots` looks for any of
+those signals together with Tor membership.
+
+Rows written before these columns existed show `?` rather than `NO`, and count as
+`not recorded` rather than `ordinary`, because never having been asked is not the
+same as having answered no. `enrich` fills in the network and reverse DNS for
+them after the fact, from the address alone - it only ever marks an address as
+Tor, never as ordinary, since an address missing from today's exit list may still
+have been one when the request arrived.
 
 `scripts/logins.sh` reads it in the running container:
 
@@ -114,8 +124,11 @@ straight at `/login` has neither - `bots` is the view for that.
 ./scripts/logins.sh email a@b.se     # everything for one address
 ./scripts/logins.sh ip 45.9.148.99   # everything from one client
 ./scripts/logins.sh daily            # day by day, for spotting a burst
-./scripts/logins.sh bots             # Tor exits, and requests with no cookie
+./scripts/logins.sh bots             # Tor, quoted user agents, missing cookie
 ./scripts/logins.sh networks         # how much came over Tor
+./scripts/logins.sh full 30          # every column, last 30 events
+./scripts/logins.sh show 25          # one event, every field, untruncated
+./scripts/logins.sh enrich           # backfill network and rdns on older rows
 ./scripts/logins.sh size             # rows, bytes, how fast it is growing
 ./scripts/logins.sh help             # the rest
 ```
