@@ -48,7 +48,11 @@ const bytes = (n) => {
 const recent = (limit) =>
   db
     .prepare(
-      `SELECT id, created_at, email, event, ip, detail
+      `SELECT id, created_at, email, event, ip, network,
+              CASE has_visitor_cookie WHEN 1 THEN 'yes' WHEN 0 THEN 'NO' ELSE '?' END AS cookie,
+              CASE WHEN has_visitor_cookie IS NULL THEN '?'
+                   WHEN referer IS NULL THEN 'NO' ELSE 'yes' END AS referer,
+              detail
        FROM login_events ORDER BY id DESC LIMIT ?`
     )
     .all(limit);
@@ -62,7 +66,8 @@ const byIp = (n) =>
               SUM(event = 'sent') AS mails_sent,
               SUM(event = 'send_failed') AS failed,
               SUM(event = 'verified') AS signed_in,
-              MIN(created_at) AS first_seen,
+              MAX(network) AS network,
+              MAX(rdns) AS rdns,
               MAX(created_at) AS last_seen
        FROM login_events WHERE created_at > ${since(n)}
        GROUP BY ip ORDER BY mails_sent DESC, events DESC`
@@ -105,6 +110,39 @@ const perDay = (n) =>
               COUNT(DISTINCT ip) AS ips
        FROM login_events WHERE created_at > ${since(n)}
        GROUP BY day ORDER BY day DESC`
+    )
+    .all();
+
+// A browser that filled in the form carries the cookie it was given on the way
+// in and a referer pointing back here. A Tor exit is worth seeing on its own.
+const automated = (n) =>
+  db
+    .prepare(
+      `SELECT ip, MAX(network) AS network, MAX(rdns) AS rdns,
+              COUNT(*) AS events, COUNT(DISTINCT email) AS addresses,
+              SUM(event = 'sent') AS mails_sent,
+              SUM(event = 'verified') AS signed_in,
+              SUM(COALESCE(has_visitor_cookie, 0) = 0) AS no_cookie,
+              SUM(referer IS NULL) AS no_referer,
+              MAX(accept_language) AS accept_language,
+              MAX(user_agent) AS user_agent
+       FROM login_events
+       WHERE created_at > ${since(n)}
+         AND (network = 'tor' OR COALESCE(has_visitor_cookie, 1) = 0 OR referer IS NULL)
+       GROUP BY ip ORDER BY events DESC`
+    )
+    .all();
+
+const networks = (n) =>
+  db
+    .prepare(
+      `SELECT COALESCE(network, 'ordinary') AS network,
+              COUNT(*) AS events, COUNT(DISTINCT ip) AS ips,
+              COUNT(DISTINCT email) AS addresses,
+              SUM(event = 'sent') AS mails_sent,
+              SUM(event = 'verified') AS signed_in
+       FROM login_events WHERE created_at > ${since(n)}
+       GROUP BY COALESCE(network, 'ordinary') ORDER BY events DESC`
     )
     .all();
 
@@ -212,8 +250,12 @@ const commands = {
     size();
     heading(`What happened in ${window(n)}`);
     show(summary(n));
+    heading(`By network, ${window(n)}`);
+    show(networks(n));
     heading(`Where it came from, ${window(n)}`);
     show(byIp(n));
+    heading(`Looks automated, ${window(n)}`);
+    show(automated(n), "nothing - every request carried a cookie and a referer");
     heading(`Sent a code and never signed in, ${window(n)}`);
     show(unverified(n), "none - every code that went out was used");
     heading("The last 15 events");
@@ -233,6 +275,21 @@ const commands = {
     console.log(
       "  One address, many addresses, no sign-ins is the shape to watch for."
     );
+  },
+
+  bots() {
+    const n = days(30);
+    heading(`Tor, or no cookie, or no referer - ${window(n)}`);
+    show(automated(n), "nothing - every request looked like a browser");
+    console.log(
+      "  no_cookie counts requests that never loaded a page on this site first."
+    );
+  },
+
+  networks() {
+    const n = days(30);
+    heading(`By network, ${window(n)}`);
+    show(networks(n));
   },
 
   unverified() {
@@ -260,7 +317,8 @@ const commands = {
     show(
       db
         .prepare(
-          `SELECT id, created_at, event, ip, detail, user_agent
+          `SELECT id, created_at, event, ip, network, rdns, detail,
+                has_visitor_cookie AS cookie, referer, accept_language, user_agent
            FROM login_events WHERE email = ? ORDER BY id`
         )
         .all(address)
@@ -274,7 +332,8 @@ const commands = {
     show(
       db
         .prepare(
-          `SELECT id, created_at, email, event, detail, user_agent
+          `SELECT id, created_at, email, event, network, rdns, detail,
+                has_visitor_cookie AS cookie, referer, accept_language, user_agent
            FROM login_events WHERE ip = ? ORDER BY id`
         )
         .all(address)
@@ -324,6 +383,8 @@ Reads the sign-in log in ${dbPath}
   ips [days]           where the traffic came from
   unverified [days]    addresses sent a code that never signed in (default 30)
   daily [days]         day by day, for spotting a burst (default 30)
+  bots [days]          Tor exits, and requests with no cookie or no referer
+  networks [days]      how much came over Tor rather than an ordinary line
   recent [n]           the last n events (default 50)
   email <address>      everything recorded for one address
   ip <address>         everything recorded from one client address

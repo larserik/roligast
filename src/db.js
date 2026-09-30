@@ -74,6 +74,16 @@ db.exec(`
     ip TEXT,
     user_agent TEXT,
     detail TEXT,
+    -- Where the request says it came from. A browser that filled in the form
+    -- arrives with a referer and the visitor cookie it was given on the way in;
+    -- something posting straight at /login has neither.
+    referer TEXT,
+    accept_language TEXT,
+    has_visitor_cookie INTEGER,
+    -- Filled in from the address itself: its reverse DNS name, and 'tor' when
+    -- it is on the published list of exit nodes.
+    rdns TEXT,
+    network TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
   );
 
@@ -88,5 +98,30 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_posts_user ON posts(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_ratings_rater ON ratings(rater_key, created_at DESC);
 `);
+
+// Columns added after a database was first created. ALTER TABLE ADD COLUMN is
+// cheap and idempotent this way, so a deploy needs no migration step.
+function ensureColumns(table, columns) {
+  const existing = new Set(
+    db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name)
+  );
+  for (const [name, definition] of Object.entries(columns)) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    }
+  }
+}
+
+ensureColumns("login_events", {
+  referer: "TEXT",
+  accept_language: "TEXT",
+  has_visitor_cookie: "INTEGER",
+  rdns: "TEXT",
+  network: "TEXT",
+});
+
+db.exec(
+  "CREATE INDEX IF NOT EXISTS idx_login_events_network ON login_events(network, created_at DESC)"
+);
 
 export default db;

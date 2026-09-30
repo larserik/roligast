@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import db from "./db.js";
 import { sendPin } from "./mailer.js";
 import { generatePublicId } from "./ids.js";
+import { isTorExit, reverseDns } from "./network.js";
 
 const PIN_TTL_MS = 10 * 60 * 1000;
 const PIN_RESEND_MS = 60 * 1000;
@@ -11,26 +12,56 @@ const SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 // A user agent is logged to tell a browser from a script, not to fingerprint
 // anyone, so only the front of it is kept.
 const USER_AGENT_MAX = 200;
+const REFERER_MAX = 300;
+const ACCEPT_LANGUAGE_MAX = 100;
 const insertEvent = db.prepare(
-  "INSERT INTO login_events (email, event, ip, user_agent, detail) VALUES (?, ?, ?, ?, ?)"
+  `INSERT INTO login_events
+     (email, event, ip, user_agent, detail, referer, accept_language,
+      has_visitor_cookie, network)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
+const setRdns = db.prepare("UPDATE login_events SET rdns = ? WHERE id = ?");
+
+const trim = (value, max) => (value ? String(value).slice(0, max) : null);
 
 // Every step of a sign-in, whether or not it worked. Nothing here is allowed to
 // stop someone getting in, so a log that cannot be written is only complained
 // about.
 export function recordLoginEvent(email, event, context = {}, detail = null) {
+  let id;
   try {
-    insertEvent.run(
+    // Whether the address is a Tor exit is a lookup in a set already in memory,
+    // so it costs nothing to decide here.
+    const result = insertEvent.run(
       email || "",
       event,
       context.ip || null,
-      context.userAgent
-        ? String(context.userAgent).slice(0, USER_AGENT_MAX)
-        : null,
-      detail
+      trim(context.userAgent, USER_AGENT_MAX),
+      detail,
+      trim(context.referer, REFERER_MAX),
+      trim(context.acceptLanguage, ACCEPT_LANGUAGE_MAX),
+      context.hasVisitorCookie === undefined
+        ? null
+        : context.hasVisitorCookie
+          ? 1
+          : 0,
+      isTorExit(context.ip) ? "tor" : null
     );
+    id = result.lastInsertRowid;
   } catch (err) {
     console.error("[login_events] could not record", event, err);
+    return;
+  }
+
+  // The reverse lookup goes over the network, so it happens after the row is
+  // safely written and fills the column in when it comes back. The visitor is
+  // never waiting on it.
+  if (context.ip) {
+    reverseDns(context.ip)
+      .then((hostname) => {
+        if (hostname) setRdns.run(hostname, id);
+      })
+      .catch(() => {});
   }
 }
 

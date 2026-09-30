@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import db from "./db.js";
 import { generatePostId, generateVisitorId } from "./ids.js";
 import { parseUrl, kindOf } from "./embed.js";
+import { startNetworkLookups } from "./network.js";
 import { average, ratePost, ratingFor, claimRatings } from "./ratings.js";
 import {
   LANGS,
@@ -99,7 +100,11 @@ app.use(sessionMiddleware);
 // one visitor from rating the same post ten times.
 app.use((req, res, next) => {
   let visitor = req.cookies?.[VISITOR_COOKIE];
-  if (!/^[0-9a-f]{32}$/.test(visitor || "")) {
+  // Noted before a new one is handed out. Anyone who filled in a form on this
+  // site was given this cookie when they loaded the page it was on, so a
+  // request arriving without one never loaded a page.
+  req.hadVisitorCookie = /^[0-9a-f]{32}$/.test(visitor || "");
+  if (!req.hadVisitorCookie) {
     visitor = generateVisitorId();
     res.cookie(VISITOR_COOKIE, visitor, cookieOpts(req, YEAR_MS));
   }
@@ -175,6 +180,9 @@ app.use((req, res, next) => {
 const loginContext = (req) => ({
   ip: req.ip,
   userAgent: req.get("user-agent"),
+  referer: req.get("referer"),
+  acceptLanguage: req.get("accept-language"),
+  hasVisitorCookie: req.hadVisitorCookie,
 });
 
 // Only allows redirects back into this site. A browser reads "//evil.se" and
@@ -597,6 +605,9 @@ app.use((err, req, res, next) => {
     title: res.locals.t ? res.locals.t("err_generic") : "Error",
   });
 });
+
+// The Tor exit list loads in the background and refreshes through the day.
+startNetworkLookups();
 
 // Expired sessions and unused codes are cleared at start and once a day after.
 pruneExpired();
