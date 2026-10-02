@@ -95,6 +95,7 @@ const recent = (limit) =>
               CASE WHEN ${OLD_ROW} THEN '?'
                    WHEN referer IS NULL THEN 'NO' ELSE 'yes' END AS referer,
               CASE WHEN ${QUOTED_UA} THEN 'quoted' ELSE '' END AS ua,
+              COALESCE(signals, '') AS marks,
               detail
        FROM login_events ORDER BY id DESC LIMIT ?`
     )
@@ -381,6 +382,74 @@ const commands = {
     );
   },
 
+  // The point of reporting rather than acting: counting how often each mark
+  // would have refused a code to someone who turned out to be real.
+  signals() {
+    const n = days(30);
+    const rows = db
+      .prepare(
+        `SELECT email, COALESCE(signals, '') AS signals
+         FROM login_events
+         WHERE event = 'requested' AND created_at > ${since(n)}`
+      )
+      .all();
+    const real = new Set(
+      db
+        .prepare("SELECT DISTINCT email FROM login_events WHERE event = 'verified'")
+        .all()
+        .map((row) => row.email)
+    );
+
+    const tally = (key, row, bucket) => {
+      if (!bucket[key]) bucket[key] = { requests: 0, addresses: new Set(), real: new Set() };
+      bucket[key].requests++;
+      bucket[key].addresses.add(row.email);
+      if (real.has(row.email)) bucket[key].real.add(row.email);
+    };
+
+    const perSignal = {};
+    const perSet = {};
+    for (const row of rows) {
+      const present = row.signals ? row.signals.split(",") : [];
+      for (const name of present) tally(name, row, perSignal);
+      tally(present.length ? present.join(",") : "(no marks)", row, perSet);
+    }
+
+    const render = (bucket) =>
+      Object.entries(bucket)
+        .sort((a, b) => b[1].requests - a[1].requests)
+        .map(([name, v]) => ({
+          [bucket === perSignal ? "mark" : "marks present"]: name,
+          requests: v.requests,
+          addresses: v.addresses.size,
+          // The column that decides it. Anything above zero is a real person
+          // who would have been turned away without being told.
+          of_those_real: v.real.size,
+        }));
+
+    heading(`Each mark on its own, ${window(n)}`);
+    show(render(perSignal), "no sign-in requests in that window");
+    heading(`The marks as they actually came, ${window(n)}`);
+    show(render(perSet));
+    console.log(
+      "  of_those_real counts addresses that have completed a sign-in at some point.\n" +
+        "  A mark is safe to act on while that column is zero."
+    );
+
+    const acted = db
+      .prepare(
+        `SELECT event, COUNT(*) AS n, MAX(created_at) AS last_seen
+         FROM login_events
+         WHERE event IN ('would_suppress', 'suppressed') AND created_at > ${since(n)}
+         GROUP BY event`
+      )
+      .all();
+    if (acted.length) {
+      heading("What the setting did");
+      show(acted);
+    }
+  },
+
   bots() {
     const n = days(30);
     heading(`Tor, or no cookie, or no referer - ${window(n)}`);
@@ -540,7 +609,10 @@ const commands = {
         .prepare(
           `SELECT created_at, id, 'login' AS source, NULL AS method, NULL AS path,
                   NULL AS status, NULL AS duration_ms, NULL AS referer,
-                  event AS type, email AS target, detail, NULL AS at_ms
+                  event AS type, email AS target,
+                  COALESCE(detail, '') ||
+                    CASE WHEN signals IS NULL THEN '' ELSE '  [' || signals || ']' END AS detail,
+                  NULL AS at_ms
            FROM login_events WHERE visitor_id = ?`
         )
         .all(visitor.id),
@@ -664,6 +736,7 @@ Reads the sign-in log in ${dbPath}
   daily [days]         day by day, for spotting a burst (default 30)
   full [n]             every column for the last n events (default 30)
   show <id>            one event, every field, nothing truncated
+  signals [days]       each mark, and how many real people it would have caught
   bots [days]          Tor exits, quoted user agents, missing cookie or referer
   networks [days]      how much came over Tor rather than an ordinary line
   recent [n]           the last n events (default 50)

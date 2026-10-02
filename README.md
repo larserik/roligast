@@ -203,6 +203,43 @@ The caps are in `src/tracking.js`: 200 events per batch, 2000 page views and
 5000 events per visitor. `size` reports what these tables hold alongside the
 sign-in log. They grow faster than it does, so they are the ones to watch.
 
+## Marks on a sign-in request
+
+Every request for a code is measured against four marks and the result is kept
+in `login_events.signals`:
+
+| mark | what it means | what else it would catch |
+| --- | --- | --- |
+| `quoted_ua` | the `User-Agent` is wrapped in literal double quotes | nothing a browser does; someone hand-editing their own user agent could leave the quotes in |
+| `ua_mismatch` | the `User-Agent` and `sec-ch-ua` disagree about the platform or the version, or it claims Chrome while listing only Chromium | a user-agent spoofing extension, or a proxy that rewrites the header |
+| `no_js` | two or more pages loaded and not one browser event reported | JavaScript off, an extension blocking beacons, or leaving within 1.5s |
+| `tor` | the address is on the Tor Project's exit list | anyone who would rather not be followed around |
+
+```sh
+./scripts/logins.sh signals 0
+```
+
+The column that matters is `of_those_real` - how many addresses carrying that
+mark have ever completed a sign-in. **A mark is safe to act on while that reads
+zero**, and not before.
+
+`SUPPRESS_SIGNINS` decides what happens: `off` records the marks and nothing
+else, `report` also notes what it would have withheld and sends the code anyway,
+`on` withholds it. It ships as `report`, so deploying changes nothing.
+`SUPPRESS_ON` lists which marks would act, and `tor` is refused there on purpose.
+
+Two things hold whatever the setting:
+
+- **An address with an account is never refused a code.** Being silently unable
+  to sign in is the worst thing this could do, and it must not happen to someone
+  who has signed in before.
+- **Nothing else about the response changes.** The same page, the same 200, and
+  the code is still generated and stored - skip that and a later attempt would
+  answer `pin_expired` instead of `pin_wrong`, which is a difference someone
+  could see. The withheld path also waits 170-390ms, because a real send takes
+  194-325ms and one that sends nothing takes two, and that gap is the one thing
+  measurable from outside.
+
 ## Notes
 
 - The real SMTP password lives only in `.env`, which `.gitignore` keeps out of

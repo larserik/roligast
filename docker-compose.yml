@@ -25,6 +25,10 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # off | report | on. report records what would have been withheld and
+      # sends the code anyway, which is what it ships as.
+      SUPPRESS_SIGNINS: ${SUPPRESS_SIGNINS:-report}
+      SUPPRESS_ON: ${SUPPRESS_ON:-quoted_ua}
     volumes:
       - roligast-data:/data
 

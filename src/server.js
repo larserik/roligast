@@ -14,7 +14,10 @@ import {
   notePageView,
   recordEvents,
   linkVisitorToUser,
+  countsFor,
 } from "./tracking.js";
+import { detectSignals } from "./signals.js";
+import { isTorExit } from "./network.js";
 import { average, ratePost, ratingFor, claimRatings } from "./ratings.js";
 import {
   LANGS,
@@ -32,6 +35,7 @@ import {
   requireUser,
   pruneExpired,
   recordLoginEvent,
+  describeSuppression,
 } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -217,14 +221,25 @@ app.use((req, res, next) => {
 });
 
 // What the sign-in log records about a request beyond the address typed in.
-const loginContext = (req) => ({
-  ip: req.ip,
-  userAgent: req.get("user-agent"),
-  referer: req.get("referer"),
-  acceptLanguage: req.get("accept-language"),
-  hasVisitorCookie: req.hadVisitorCookie,
-  visitorId: req.visitorId,
-});
+const loginContext = (req) => {
+  const counts = countsFor(req.visitorId);
+  return {
+    ip: req.ip,
+    userAgent: req.get("user-agent"),
+    referer: req.get("referer"),
+    acceptLanguage: req.get("accept-language"),
+    hasVisitorCookie: req.hadVisitorCookie,
+    visitorId: req.visitorId,
+    signals: detectSignals({
+      userAgent: req.get("user-agent"),
+      brands: req.get("sec-ch-ua"),
+      platformHint: req.get("sec-ch-ua-platform"),
+      isTor: isTorExit(req.ip),
+      pageViews: counts.page_views,
+      events: counts.events,
+    }),
+  };
+};
 
 // Pages that exist to get someone signed in. Coming back to one of them after
 // signing in is never what was wanted.
@@ -676,6 +691,7 @@ app.use((err, req, res, next) => {
 
 // The Tor exit list loads in the background and refreshes through the day.
 startNetworkLookups();
+console.log(`[auth] ${describeSuppression()}`);
 
 // Expired sessions and unused codes are cleared at start and once a day after.
 pruneExpired();

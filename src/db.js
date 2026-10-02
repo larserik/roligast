@@ -168,6 +168,7 @@ function ensureColumns(table, columns) {
 // that led to it.
 ensureColumns("login_events", {
   visitor_id: "TEXT",
+  signals: "TEXT",
   referer: "TEXT",
   accept_language: "TEXT",
   has_visitor_cookie: "INTEGER",

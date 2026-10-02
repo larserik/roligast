@@ -3,6 +3,7 @@ import db from "./db.js";
 import { sendPin } from "./mailer.js";
 import { generatePublicId } from "./ids.js";
 import { isTorExit, reverseDns } from "./network.js";
+import { decide, MODE, TRIGGERS } from "./signals.js";
 
 const PIN_TTL_MS = 10 * 60 * 1000;
 const PIN_RESEND_MS = 60 * 1000;
@@ -12,13 +13,17 @@ const SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 // A user agent is logged to tell a browser from a script, not to fingerprint
 // anyone, so only the front of it is kept.
 const USER_AGENT_MAX = 200;
+// What a real send costs, from the nginx log: 194-325ms against 1-8ms for a
+// request that sends nothing.
+const SEND_DELAY_MIN_MS = 170;
+const SEND_DELAY_SPREAD_MS = 220;
 const REFERER_MAX = 300;
 const ACCEPT_LANGUAGE_MAX = 100;
 const insertEvent = db.prepare(
   `INSERT INTO login_events
      (email, event, ip, user_agent, detail, referer, accept_language,
-      has_visitor_cookie, network, visitor_id)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      has_visitor_cookie, network, visitor_id, signals)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const setRdns = db.prepare("UPDATE login_events SET rdns = ? WHERE id = ?");
 
@@ -46,7 +51,10 @@ export function recordLoginEvent(email, event, context = {}, detail = null) {
           ? 1
           : 0,
       isTorExit(context.ip) ? "tor" : null,
-      context.visitorId || null
+      context.visitorId || null,
+      Array.isArray(context.signals) && context.signals.length
+        ? context.signals.join(",")
+        : null
     );
     id = result.lastInsertRowid;
   } catch (err) {
@@ -96,6 +104,28 @@ export async function requestPin(email, lang, context = {}) {
   ).run(email, hashPin(email, pin), now + PIN_TTL_MS, now);
 
   recordLoginEvent(email, "requested", context, lang);
+
+  // An address that has signed in before is never refused a code.
+  const hasAccount = Boolean(
+    db.prepare("SELECT 1 FROM users WHERE email = ?").get(email)
+  );
+  const verdict = decide(context.signals || [], { hasAccount });
+
+  if (verdict.note) {
+    // Report mode: this is what would have been withheld. The code still goes.
+    recordLoginEvent(email, "would_suppress", context, verdict.reason);
+  }
+  if (verdict.withhold) {
+    recordLoginEvent(email, "suppressed", context, verdict.reason);
+    // A real send takes a few hundred milliseconds and a skipped one takes
+    // none, which is the one way the difference could be measured from
+    // outside. This closes it.
+    await new Promise((resolve) =>
+      setTimeout(resolve, SEND_DELAY_MIN_MS + Math.random() * SEND_DELAY_SPREAD_MS)
+    );
+    return { ok: true };
+  }
+
   try {
     await sendPin(email, pin, lang);
   } catch (err) {
@@ -173,6 +203,15 @@ function createUser(email) {
     }
   }
   throw new Error("Could not generate a unique public id for the user");
+}
+
+// Said once at startup so the setting is never a surprise.
+export function describeSuppression() {
+  if (MODE === "off") return "sign-in suppression: off, marks recorded only";
+  if (MODE === "report") {
+    return `sign-in suppression: reporting only, would act on [${TRIGGERS.join(", ")}] - codes still sent`;
+  }
+  return `sign-in suppression: ON for [${TRIGGERS.join(", ")}] - no code sent to a matching request without an account`;
 }
 
 export function logout(token) {

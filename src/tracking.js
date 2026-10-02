@@ -79,6 +79,14 @@ function headerBlob(req) {
   return trim(JSON.stringify(kept), HEADERS_MAX);
 }
 
+// How much this browser has loaded and how much it has reported back, which is
+// what tells a browser that ran the page from one that only fetched it.
+const visitorCounts = db.prepare(
+  "SELECT page_views, events FROM visitors WHERE id = ?"
+);
+export const countsFor = (visitorId) =>
+  visitorCounts.get(visitorId) || { page_views: 0, events: 0 };
+
 // Called once per request, before the response goes out.
 export function noteVisitor(req) {
   try {
