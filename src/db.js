@@ -91,6 +91,58 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_login_events_email ON login_events(email, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_login_events_ip ON login_events(ip, created_at DESC);
 
+  -- One row per browser, written the first time it is seen. This is the "how
+  -- did they get here" record: the page they landed on, the referer that sent
+  -- them, and the whole header set the request arrived with.
+  CREATE TABLE IF NOT EXISTS visitors (
+    id TEXT PRIMARY KEY,
+    first_seen TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+    last_seen TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+    landing_path TEXT,
+    landing_referer TEXT,
+    ip TEXT,
+    rdns TEXT,
+    network TEXT,
+    user_agent TEXT,
+    accept_language TEXT,
+    headers TEXT,
+    page_views INTEGER NOT NULL DEFAULT 0,
+    events INTEGER NOT NULL DEFAULT 0,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  -- Every page the server rendered for them, in order.
+  CREATE TABLE IF NOT EXISTS page_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visitor_id TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    referer TEXT,
+    status INTEGER,
+    duration_ms INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
+  );
+
+  -- What happened inside those pages, reported by the browser: clicks, scrolls,
+  -- which field was being filled and how, what the page loaded. Never the typed
+  -- value of anything - only how it arrived.
+  CREATE TABLE IF NOT EXISTS visitor_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visitor_id TEXT NOT NULL,
+    path TEXT,
+    type TEXT NOT NULL,
+    target TEXT,
+    detail TEXT,
+    at_ms INTEGER,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_visitors_seen ON visitors(first_seen DESC);
+  CREATE INDEX IF NOT EXISTS idx_visitors_ip ON visitors(ip, first_seen DESC);
+  CREATE INDEX IF NOT EXISTS idx_page_views_visitor ON page_views(visitor_id, id);
+  CREATE INDEX IF NOT EXISTS idx_page_views_created ON page_views(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_visitor_events_visitor ON visitor_events(visitor_id, id);
+
   CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_posts_score ON posts(score DESC, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_posts_kind ON posts(kind, created_at DESC);
@@ -112,7 +164,10 @@ function ensureColumns(table, columns) {
   }
 }
 
+// login_events gains the visitor so a sign-in attempt joins to the journey
+// that led to it.
 ensureColumns("login_events", {
+  visitor_id: "TEXT",
   referer: "TEXT",
   accept_language: "TEXT",
   has_visitor_cookie: "INTEGER",

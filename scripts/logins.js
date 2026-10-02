@@ -229,6 +229,28 @@ function size() {
       MEASURED_BYTES_PER_ROW * 1e6
     )}.`
   );
+
+  // The journey tables grow faster than the sign-in log, so they are reported
+  // beside it rather than left to be discovered.
+  const tables = db
+    .prepare(
+      `SELECT name, SUM(pgsize) AS bytes FROM dbstat
+       WHERE name IN ('visitors', 'page_views', 'visitor_events')
+          OR name LIKE 'idx_visitors%' OR name LIKE 'idx_page_views%'
+          OR name LIKE 'idx_visitor_events%'
+       GROUP BY name`
+    )
+    .all()
+    .reduce((total, row) => total + row.bytes, 0);
+  const counts = db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM visitors) AS visitors,
+              (SELECT COUNT(*) FROM page_views) AS page_views,
+              (SELECT COUNT(*) FROM visitor_events) AS events`
+    )
+    .get();
+  heading("What the journey log is holding");
+  console.table([{ ...counts, on_disk: bytes(tables) }]);
   console.log(
     "  Nothing is deleted on its own. To cut it back by hand, for example:\n" +
       "    node scripts/logins.js prune 365 --yes"
@@ -391,6 +413,140 @@ const commands = {
     );
   },
 
+  // Everyone who has loaded a page, newest first.
+  visitors() {
+    const limit = Number(positional[0]) || 30;
+    heading(`The last ${limit} visitors`);
+    show(
+      db
+        .prepare(
+          `SELECT substr(v.id, 1, 8) AS visitor, v.first_seen, v.ip,
+                  COALESCE(v.network, '-') AS network,
+                  COALESCE(v.landing_path, '-') AS landed_on,
+                  COALESCE(v.landing_referer, 'direct') AS came_from,
+                  v.page_views, v.events,
+                  COALESCE(u.email, '-') AS signed_in_as
+           FROM visitors v
+           LEFT JOIN users u ON u.id = v.user_id
+           ORDER BY v.first_seen DESC LIMIT ?`
+        )
+        .all(limit),
+      "nobody has loaded a page yet"
+    );
+    console.log("  logins.js journey <visitor> for the whole of one of them.");
+  },
+
+  // One visitor, everything known about them and everything they did.
+  journey() {
+    const wanted = positional[0];
+    if (!wanted) return console.error("Which visitor? logins.js journey 5b11658b");
+
+    const visitor = db
+      .prepare(
+        `SELECT v.*, u.email AS signed_in_as FROM visitors v
+         LEFT JOIN users u ON u.id = v.user_id
+         WHERE v.id = ? OR v.id LIKE ? || '%' LIMIT 1`
+      )
+      .get(wanted, wanted);
+    if (!visitor) return console.error(`No visitor matching "${wanted}".`);
+
+    heading(`Visitor ${visitor.id}`);
+    const facts = {
+      "first seen": visitor.first_seen,
+      "last seen": visitor.last_seen,
+      "landed on": visitor.landing_path || "-",
+      "came from": visitor.landing_referer || "direct (no referer)",
+      address: visitor.ip || "-",
+      "reverse dns": visitor.rdns || "-",
+      network: visitor.network || "ordinary",
+      browser: visitor.user_agent || "-",
+      language: visitor.accept_language || "-",
+      "signed in as": visitor.signed_in_as || "-",
+      "pages / events": `${visitor.page_views} / ${visitor.events}`,
+    };
+    for (const [name, value] of Object.entries(facts)) {
+      console.log(`  ${name.padEnd(15)} ${value}`);
+    }
+
+    if (visitor.headers) {
+      console.log("\n  headers on the request that brought them here");
+      let headers;
+      try {
+        headers = JSON.parse(visitor.headers);
+      } catch {
+        headers = null;
+      }
+      if (headers) {
+        for (const [name, value] of Object.entries(headers)) {
+          console.log(`    ${name.padEnd(22)} ${String(value).slice(0, 110)}`);
+        }
+      } else {
+        console.log(`    ${visitor.headers}`);
+      }
+    }
+
+    // Three sources, one order. Browser events are stamped when their batch
+    // reached the server, so they also carry how long after that page loaded
+    // they happened, which is the ordering that actually means something.
+    const steps = [
+      ...db
+        .prepare(
+          `SELECT created_at, id, 'page' AS source, method, path, status,
+                  duration_ms, referer, NULL AS type, NULL AS target,
+                  NULL AS detail, NULL AS at_ms
+           FROM page_views WHERE visitor_id = ?`
+        )
+        .all(visitor.id),
+      ...db
+        .prepare(
+          `SELECT created_at, id, 'event' AS source, NULL AS method, path,
+                  NULL AS status, NULL AS duration_ms, NULL AS referer,
+                  type, target, detail, at_ms
+           FROM visitor_events WHERE visitor_id = ?`
+        )
+        .all(visitor.id),
+      ...db
+        .prepare(
+          `SELECT created_at, id, 'login' AS source, NULL AS method, NULL AS path,
+                  NULL AS status, NULL AS duration_ms, NULL AS referer,
+                  event AS type, email AS target, detail, NULL AS at_ms
+           FROM login_events WHERE visitor_id = ?`
+        )
+        .all(visitor.id),
+    ].sort((a, b) =>
+      a.created_at === b.created_at
+        ? a.id - b.id
+        : a.created_at < b.created_at
+          ? -1
+          : 1
+    );
+
+    heading(`What they did  (${steps.length} steps)`);
+    if (steps.length === 0) return console.log("  (nothing recorded)");
+
+    const started = new Date(steps[0].created_at.replace(" ", "T") + "Z").getTime();
+    for (const step of steps) {
+      const at = new Date(step.created_at.replace(" ", "T") + "Z").getTime();
+      const offset = `+${((at - started) / 1000).toFixed(1)}s`.padStart(9);
+
+      if (step.source === "page") {
+        const from = step.referer ? `  <- ${step.referer}` : "";
+        console.log(
+          `${offset}  PAGE   ${step.method} ${step.path} -> ${step.status} (${step.duration_ms}ms)${from}`
+        );
+      } else if (step.source === "login") {
+        console.log(
+          `${offset}  SIGNIN ${step.type} ${step.target || ""}${step.detail ? " - " + step.detail : ""}`
+        );
+      } else {
+        const since = step.at_ms === null ? "" : ` @${(step.at_ms / 1000).toFixed(1)}s`;
+        console.log(
+          `${offset}  ${String(step.type).toUpperCase().padEnd(6)}${since.padStart(8)}  ${step.target || ""}${step.detail ? "  " + step.detail : ""}`
+        );
+      }
+    }
+  },
+
   users() {
     heading("Accounts");
     show(
@@ -478,6 +634,8 @@ Reads the sign-in log in ${dbPath}
   recent [n]           the last n events (default 50)
   email <address>      everything recorded for one address
   ip <address>         everything recorded from one client address
+  visitors [n]         everyone who loaded a page, newest first
+  journey <visitor>    one visitor: how they arrived, their headers, every step
   users                accounts, with their posts, ratings and live sessions
   pending              codes that are still live
   size                 rows, bytes on disk and how fast it is growing

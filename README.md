@@ -55,6 +55,7 @@ src/
   i18n.js     the Swedish and English dictionaries
   mailer.js   the sign-in code email
   network.js  the Tor exit list and reverse DNS, neither in the request path
+  tracking.js who a visitor is, what they loaded and what they did on it
   views/      EJS templates
   public/     stylesheet, a little progressive-enhancement JavaScript, the logo
 scripts/
@@ -159,6 +160,34 @@ leftmost entry, which the client writes). If every row shows the same `172.x`
 address, nginx is not passing `X-Forwarded-For` and its `proxy_set_header` needs
 fixing before the column means anything.
 
+
+## Following a visitor
+
+Three tables record a journey. `visitors` is written once per browser and holds
+how they arrived: the page they landed on, the referer that sent them, their
+address and its reverse DNS, and the whole header set of that first request.
+`page_views` has every page the server rendered for them, in order.
+`visitor_events` has what the browser reported from inside those pages - which
+links were clicked, how far it scrolled, which field was being filled and how,
+and every URL the page loaded.
+
+```sh
+./scripts/logins.sh visitors         # everyone who loaded a page, newest first
+./scripts/logins.sh journey 5b11658b # one of them, entry headers and every step
+```
+
+A journey merges all three sources plus the sign-in log into one timeline, so a
+visit reads straight through: arrived from Google, loaded these files, scrolled
+half way, clicked a rating, asked for a code, signed in.
+
+**What is never recorded: the value of anything anyone types.** A field reports
+how many characters it ended up with and whether they were typed, pasted or
+filled in by the browser - never what they were. Cookies are left out of the
+stored header set for the same reason, since the session token is among them.
+
+The caps are in `src/tracking.js`: 200 events per batch, 2000 page views and
+5000 events per visitor. `size` reports what these tables hold alongside the
+sign-in log. They grow faster than it does, so they are the ones to watch.
 
 ## Notes
 

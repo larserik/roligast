@@ -17,8 +17,8 @@ const ACCEPT_LANGUAGE_MAX = 100;
 const insertEvent = db.prepare(
   `INSERT INTO login_events
      (email, event, ip, user_agent, detail, referer, accept_language,
-      has_visitor_cookie, network)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      has_visitor_cookie, network, visitor_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const setRdns = db.prepare("UPDATE login_events SET rdns = ? WHERE id = ?");
 
@@ -45,7 +45,8 @@ export function recordLoginEvent(email, event, context = {}, detail = null) {
         : context.hasVisitorCookie
           ? 1
           : 0,
-      isTorExit(context.ip) ? "tor" : null
+      isTorExit(context.ip) ? "tor" : null,
+      context.visitorId || null
     );
     id = result.lastInsertRowid;
   } catch (err) {

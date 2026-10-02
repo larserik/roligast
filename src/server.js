@@ -9,6 +9,12 @@ import db from "./db.js";
 import { generatePostId, generateVisitorId } from "./ids.js";
 import { parseUrl, kindOf } from "./embed.js";
 import { startNetworkLookups } from "./network.js";
+import {
+  noteVisitor,
+  notePageView,
+  recordEvents,
+  linkVisitorToUser,
+} from "./tracking.js";
 import { average, ratePost, ratingFor, claimRatings } from "./ratings.js";
 import {
   LANGS,
@@ -108,10 +114,39 @@ app.use((req, res, next) => {
     visitor = generateVisitorId();
     res.cookie(VISITOR_COOKIE, visitor, cookieOpts(req, YEAR_MS));
   }
+  req.visitorId = visitor;
   req.visitorKey = `v:${visitor}`;
   req.raterKey = req.user ? `u:${req.user.id}` : req.visitorKey;
   res.locals.raterKey = req.raterKey;
   next();
+});
+
+// --- What the visitor did --------------------------------------------------
+// Static files are served before any of this, so they never reach it. These
+// three are machine traffic of one sort or another and would only be noise.
+const UNTRACKED = new Set(["/healthz", "/robots.txt", "/_e"]);
+
+app.use((req, res, next) => {
+  if (UNTRACKED.has(req.path)) return next();
+  const startedAt = process.hrtime.bigint();
+  noteVisitor(req);
+  res.on("finish", () => notePageView(req, res, startedAt));
+  next();
+});
+
+// Where the browser reports what happened inside the page. It answers with
+// nothing at all: sendBeacon cannot read a response, and there is nothing a
+// visitor needs to be told.
+app.post("/_e", express.json({ limit: "32kb" }), (req, res) => {
+  const events = Array.isArray(req.body?.events) ? req.body.events : null;
+  if (events) {
+    try {
+      recordEvents(req.visitorId, String(req.body.p || ""), events);
+    } catch (err) {
+      console.error("[tracking] events", err.message);
+    }
+  }
+  res.status(204).end();
 });
 
 // --- View helpers ----------------------------------------------------------
@@ -188,6 +223,7 @@ const loginContext = (req) => ({
   referer: req.get("referer"),
   acceptLanguage: req.get("accept-language"),
   hasVisitorCookie: req.hadVisitorCookie,
+  visitorId: req.visitorId,
 });
 
 // Pages that exist to get someone signed in. Coming back to one of them after
@@ -540,6 +576,7 @@ app.post("/verify", (req, res) => {
   }
   // Whatever this browser rated before signing in now belongs to the account.
   claimRatings(req.visitorKey, `u:${result.user.id}`);
+  linkVisitorToUser(req.visitorId, result.user.id);
   res.redirect(next);
 });
 
