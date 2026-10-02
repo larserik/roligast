@@ -37,6 +37,43 @@ const window = (n) => (n > 0 ? `the last ${n} days` : "all time");
 
 const heading = (text) => console.log(`\n${text}\n${"-".repeat(text.length)}`);
 
+// console.table puts quotes round every string and a row number in front of
+// every row. The separators already say where a value begins and ends, and
+// nothing refers to the rows by number, so this draws the same box without
+// either. Numbers line up on the right, where a column of counts reads better.
+function table(rows) {
+  const columns = [];
+  for (const row of rows) {
+    for (const name of Object.keys(row)) {
+      if (!columns.includes(name)) columns.push(name);
+    }
+  }
+  const text = (value) => (value === null || value === undefined ? "" : String(value));
+  const numeric = columns.map((name) =>
+    rows.every(
+      (row) =>
+        row[name] === null || row[name] === undefined || typeof row[name] === "number"
+    )
+  );
+  const widths = columns.map((name) =>
+    Math.max(name.length, ...rows.map((row) => text(row[name]).length))
+  );
+  const pad = (value, i) =>
+    numeric[i] ? value.padStart(widths[i]) : value.padEnd(widths[i]);
+  const rule = (left, mid, right) =>
+    left + widths.map((w) => "─".repeat(w + 2)).join(mid) + right;
+
+  console.log(rule("┌", "┬", "┐"));
+  console.log("│ " + columns.map((name, i) => pad(name, i)).join(" │ ") + " │");
+  console.log(rule("├", "┼", "┤"));
+  for (const row of rows) {
+    console.log(
+      "│ " + columns.map((name, i) => pad(text(row[name]), i)).join(" │ ") + " │"
+    );
+  }
+  console.log(rule("└", "┴", "┘"));
+}
+
 // Rows written before the referer, cookie and network columns existed have
 // has_visitor_cookie NULL, and nothing written since does. That is the marker
 // for "never recorded", which must not be read as "absent".
@@ -45,7 +82,7 @@ const OLD_ROW = "has_visitor_cookie IS NULL";
 // quoted string straight into the header does.
 const QUOTED_UA = `user_agent LIKE '"%"'`;
 const show = (rows, empty = "nothing recorded") =>
-  rows.length ? console.table(rows) : console.log(`  (${empty})`);
+  rows.length ? table(rows) : console.log(`  (${empty})`);
 
 // A field event carries more than fits on a line as raw JSON, and the parts
 // worth reading are the rhythm and what it ended up holding.
@@ -94,7 +131,6 @@ const recent = (limit) =>
               CASE has_visitor_cookie WHEN 1 THEN 'yes' WHEN 0 THEN 'NO' ELSE '?' END AS cookie,
               CASE WHEN ${OLD_ROW} THEN '?'
                    WHEN referer IS NULL THEN 'NO' ELSE 'yes' END AS referer,
-              CASE WHEN ${QUOTED_UA} THEN 'quoted' ELSE '' END AS ua,
               CASE WHEN signals IS NULL THEN '?'
                    WHEN signals = '' THEN '-' ELSE signals END AS signals,
               detail
@@ -230,7 +266,7 @@ function size() {
   const perRow = totals.rows >= 500 ? stored / totals.rows : MEASURED_BYTES_PER_ROW;
 
   heading("How much the log is holding");
-  console.table([
+  table([
     {
       rows: totals.rows,
       addresses: totals.addresses,
@@ -283,7 +319,7 @@ function size() {
     )
     .get();
   heading("What the journey log is holding");
-  console.table([{ ...counts, on_disk: bytes(tables) }]);
+  table([{ ...counts, on_disk: bytes(tables) }]);
   console.log(
     "  Nothing is deleted on its own. To cut it back by hand, for example:\n" +
       "    node scripts/logins.js prune 365 --yes"
@@ -348,8 +384,9 @@ const commands = {
                        ELSE replace(replace(referer, 'https://', ''), 'http://', '') END AS referer,
                   COALESCE(accept_language, '-') AS lang,
                   COALESCE(detail, '') AS detail,
-                  CASE WHEN ${QUOTED_UA} THEN 'quoted ' ELSE '' END ||
-                    COALESCE(substr(replace(user_agent, '"', ''), 1, 38), '-') AS user_agent
+                  CASE WHEN signals IS NULL THEN '?'
+                       WHEN signals = '' THEN '-' ELSE signals END AS signals,
+                  COALESCE(substr(replace(user_agent, '"', ''), 1, 38), '-') AS user_agent
            FROM login_events ORDER BY id DESC LIMIT ?`
         )
         .all(limit)
