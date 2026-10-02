@@ -552,26 +552,31 @@ const commands = {
           : 1
     );
 
-    heading(`What they did  (${steps.length} steps)`);
+    heading(`What they did  (${steps.length} steps, times in UTC)`);
     if (steps.length === 0) return console.log("  (nothing recorded)");
 
     const started = new Date(steps[0].created_at.replace(" ", "T") + "Z").getTime();
     for (const step of steps) {
       const at = new Date(step.created_at.replace(" ", "T") + "Z").getTime();
+      // The clock time as stored, which is UTC, the same as everywhere else in
+      // this tool and the same as nginx writes - so a step here can be found in
+      // that log. The offset beside it is time since the visit began.
+      const when = String(step.created_at).padEnd(23);
       const offset = `+${((at - started) / 1000).toFixed(1)}s`.padStart(9);
+      const stamp = `${when} ${offset}`;
 
       if (step.source === "page") {
         const from = step.referer ? `  <- ${step.referer}` : "";
         console.log(
-          `${offset}  PAGE   ${step.method} ${step.path} -> ${step.status} (${step.duration_ms}ms)${from}`
+          `${stamp}  PAGE   ${step.method} ${step.path} -> ${step.status} (${step.duration_ms}ms)${from}`
         );
       } else if (step.source === "login") {
         console.log(
-          `${offset}  SIGNIN ${step.type} ${step.target || ""}${step.detail ? " - " + step.detail : ""}`
+          `${stamp}  SIGNIN ${step.type} ${step.target || ""}${step.detail ? " - " + step.detail : ""}`
         );
       } else {
         const since = step.at_ms === null ? "" : ` @${(step.at_ms / 1000).toFixed(1)}s`;
-        const head = `${offset}  ${String(step.type).toUpperCase().padEnd(6)}${since.padStart(8)}  ${step.target || ""}`;
+        const head = `${stamp}  ${String(step.type).toUpperCase().padEnd(6)}${since.padStart(8)}  ${step.target || ""}`;
         console.log(head + describe(step));
       }
     }
