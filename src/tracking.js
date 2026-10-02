@@ -13,7 +13,7 @@ import { isTorExit, reverseDns } from "./network.js";
 const SKIP_HEADERS = new Set(["cookie", "authorization"]);
 const HEADERS_MAX = 2000;
 const TARGET_MAX = 160;
-const DETAIL_MAX = 500;
+const DETAIL_MAX = 900;
 const PATH_MAX = 300;
 
 // Caps. A browser that never stops is a browser whose later events say nothing

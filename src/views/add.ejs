@@ -7,15 +7,15 @@
 
   <form action="/add" method="post" class="stacked">
     <label for="title"><%= t("field_title") %></label>
-    <input id="title" name="title" type="text" required maxlength="120" autofocus
+    <input id="title" name="title" type="text" required maxlength="120" autofocus data-track-value
            value="<%= values.title %>" placeholder="<%= t("field_title_ph") %>">
 
     <label for="body"><%= t("field_body") %></label>
-    <textarea id="body" name="body" rows="7" maxlength="5000"
+    <textarea id="body" name="body" rows="7" maxlength="5000" data-track-value
               placeholder="<%= t("field_body_ph") %>"><%= values.body %></textarea>
 
     <label for="url"><%= t("field_url") %></label>
-    <input id="url" name="url" type="url" inputmode="url" autocapitalize="none"
+    <input id="url" name="url" type="url" inputmode="url" autocapitalize="none" data-track-value
            autocorrect="off" spellcheck="false" value="<%= values.url %>"
            placeholder="<%= t("field_url_ph") %>">
     <p class="help"><%= t("field_url_help") %></p>
@@ -25,7 +25,7 @@
         <a href="/me"><%= t("me_display_name") %></a></p>
     <% } else { %>
       <label for="name"><%= t("field_name") %></label>
-      <input id="name" name="name" type="text" maxlength="40"
+      <input id="name" name="name" type="text" maxlength="40" data-track-value
              value="<%= values.name %>" placeholder="<%= t("field_name_ph") %>">
     <% } %>
 

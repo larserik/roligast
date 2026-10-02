@@ -47,6 +47,37 @@ const QUOTED_UA = `user_agent LIKE '"%"'`;
 const show = (rows, empty = "nothing recorded") =>
   rows.length ? console.table(rows) : console.log(`  (${empty})`);
 
+// A field event carries more than fits on a line as raw JSON, and the parts
+// worth reading are the rhythm and what it ended up holding.
+function describe(step) {
+  if (!step.detail) return "";
+  let d;
+  try {
+    d = JSON.parse(step.detail);
+  } catch {
+    return "  " + step.detail;
+  }
+  if (step.type !== "field") return "  " + step.detail;
+
+  const parts = [];
+  if (d.value !== undefined) parts.push(JSON.stringify(d.value));
+  else parts.push(`${d.chars} chars`);
+  parts.push(`${d.keys} keys${d.edits ? ` (${d.edits} deleting)` : ""}`);
+  if (d.pasted) parts.push("pasted");
+  if (d.filled) parts.push("FILLED WITHOUT TYPING");
+  parts.push(`over ${(d.ms / 1000).toFixed(1)}s`);
+
+  if (Array.isArray(d.gaps) && d.gaps.length) {
+    const sorted = [...d.gaps].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const shown = d.gaps.slice(0, 12).join(" ");
+    parts.push(
+      `gaps ${shown}${d.gaps.length > 12 ? " …" : ""} ms (median ${median}ms)`
+    );
+  }
+  return "  " + parts.join("  ");
+}
+
 const bytes = (n) => {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`;
@@ -540,9 +571,8 @@ const commands = {
         );
       } else {
         const since = step.at_ms === null ? "" : ` @${(step.at_ms / 1000).toFixed(1)}s`;
-        console.log(
-          `${offset}  ${String(step.type).toUpperCase().padEnd(6)}${since.padStart(8)}  ${step.target || ""}${step.detail ? "  " + step.detail : ""}`
-        );
+        const head = `${offset}  ${String(step.type).toUpperCase().padEnd(6)}${since.padStart(8)}  ${step.target || ""}`;
+        console.log(head + describe(step));
       }
     }
   },

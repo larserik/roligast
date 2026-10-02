@@ -159,23 +159,69 @@
     { passive: true }
   );
 
-  // --- form fields: how a value arrived, never what it was ------------------
-  var fields = {};
-  function fieldState(el) {
-    var key = label(el) || "field";
-    if (!fields[key]) {
-      fields[key] = { keys: 0, pasted: false, focusedAt: null, autofilled: false };
-    }
-    return fields[key];
+  // --- form fields ---------------------------------------------------------
+  // Timing and shape always; the value only where the page has said it may be
+  // recorded, and never from a field that could hold an address or a code.
+  var SENSITIVE_TYPE = /^(password|email|tel|hidden)$/;
+  var SENSITIVE_NAME = /^(email|pin|password|token)$/;
+  var GAPS_MAX = 40;
+  var VALUE_MAX = 120;
+
+  function recordsValue(el) {
+    if (!el.hasAttribute || !el.hasAttribute("data-track-value")) return false;
+    if (SENSITIVE_TYPE.test((el.type || "").toLowerCase())) return false;
+    if (SENSITIVE_NAME.test((el.name || "").toLowerCase())) return false;
+    return true;
+  }
+
+  // One session at a time: the state belongs to this visit to the field, not to
+  // the field for the life of the page. Counting across visits is how the same
+  // six keystrokes got reported three times.
+  var field = null;
+
+  function isField(el) {
+    return el && /^(INPUT|TEXTAREA)$/.test(el.tagName);
+  }
+
+  function endField() {
+    if (!field) return;
+    var el = field.el;
+    var value = el && el.value ? el.value : "";
+    var detail = {
+      chars: value.length,
+      keys: field.keys,
+      edits: field.edits,
+      pasted: field.pasted,
+      // Characters arrived without a keystroke or a paste: a password manager,
+      // the browser's autofill, or a script setting the value outright.
+      filled: value.length > 0 && field.keys === 0 && !field.pasted,
+      ms: Math.round(performance.now() - field.focusedAt),
+      // The pause before each keystroke after the first, in milliseconds. A
+      // person's rhythm is uneven and rarely under 40ms; a script's is not.
+      gaps: field.gaps,
+    };
+    if (field.records && value) detail.value = value.slice(0, VALUE_MAX);
+    push("field", field.label, detail);
+    field = null;
   }
 
   document.addEventListener(
     "focusin",
     function (event) {
-      var el = event.target;
-      if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
-      fieldState(el).focusedAt = Math.round(performance.now());
-      push("focus", label(el));
+      if (!isField(event.target)) return;
+      endField();
+      field = {
+        el: event.target,
+        label: label(event.target),
+        records: recordsValue(event.target),
+        keys: 0,
+        edits: 0,
+        gaps: [],
+        pasted: false,
+        lastKeyAt: null,
+        focusedAt: performance.now(),
+      };
+      push("focus", field.label);
     },
     true
   );
@@ -183,9 +229,16 @@
   document.addEventListener(
     "keydown",
     function (event) {
-      var el = event.target;
-      if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
-      fieldState(el).keys++;
+      if (!field || event.target !== field.el) return;
+      var now = performance.now();
+      if (field.lastKeyAt !== null && field.gaps.length < GAPS_MAX) {
+        field.gaps.push(Math.round(now - field.lastKeyAt));
+      }
+      field.lastKeyAt = now;
+      field.keys++;
+      // Which key is not recorded. Whether it was removing something is, since
+      // that is what hesitating over a field looks like.
+      if (event.key === "Backspace" || event.key === "Delete") field.edits++;
     },
     true
   );
@@ -193,9 +246,7 @@
   document.addEventListener(
     "paste",
     function (event) {
-      var el = event.target;
-      if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
-      fieldState(el).pasted = true;
+      if (field && event.target === field.el) field.pasted = true;
     },
     true
   );
@@ -203,19 +254,7 @@
   document.addEventListener(
     "focusout",
     function (event) {
-      var el = event.target;
-      if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
-      var state = fieldState(el);
-      var length = el.value ? el.value.length : 0;
-      push("field", label(el), {
-        chars: length,
-        keys: state.keys,
-        pasted: state.pasted,
-        // Characters appeared without keystrokes or a paste: a password
-        // manager, the browser's autofill, or a script setting the value.
-        filled: length > 0 && state.keys === 0 && !state.pasted,
-        ms: state.focusedAt === null ? null : Math.round(performance.now()) - state.focusedAt,
-      });
+      if (field && event.target === field.el) endField();
     },
     true
   );
@@ -224,6 +263,7 @@
     "submit",
     function (event) {
       var form = event.target;
+      endField();
       push("submit", label(form), {
         action: form && form.getAttribute ? String(form.getAttribute("action") || "").slice(0, 80) : null,
         sinceLoad: Math.round(performance.now()),
@@ -240,7 +280,10 @@
     push("visibility", null, { state: document.visibilityState });
     if (document.visibilityState === "hidden") flush();
   });
-  window.addEventListener("pagehide", flush);
+  window.addEventListener("pagehide", function () {
+    endField();
+    flush();
+  });
   setInterval(flush, FLUSH_EVERY_MS);
 
   // The first batch goes early, so a visitor who leaves at once still counts.

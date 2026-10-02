@@ -8,7 +8,7 @@
 
   <form action="/me" method="post" class="stacked inline-stacked">
     <label for="display_name"><%= t("me_display_name") %></label>
-    <input id="display_name" name="display_name" type="text" maxlength="40"
+    <input id="display_name" name="display_name" type="text" maxlength="40" data-track-value
            value="<%= user.display_name || "" %>">
     <p class="help"><%= t("me_display_name_help", { fallback: user.public_id }) %></p>
     <button class="btn" type="submit" data-loading-text="<%= t("me_saving") %>"><%= t("me_save") %></button>

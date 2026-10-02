@@ -180,10 +180,24 @@ A journey merges all three sources plus the sign-in log into one timeline, so a
 visit reads straight through: arrived from Google, loaded these files, scrolled
 half way, clicked a rating, asked for a code, signed in.
 
-**What is never recorded: the value of anything anyone types.** A field reports
-how many characters it ended up with and whether they were typed, pasted or
-filled in by the browser - never what they were. Cookies are left out of the
-stored header set for the same reason, since the session token is among them.
+**No field reports its value unless the page says it may.** A field always
+reports its shape - how many characters, how many keystrokes, how many of those
+were deleting, whether it was pasted or filled in without typing, and the pause
+before each keystroke in milliseconds. The value itself is recorded only from a
+field carrying `data-track-value`, which is on the display name and the fields
+of the add form, all of which are about to be published anyway. The email box
+and the code box do not carry it, and `track.js` refuses a field whose type or
+name looks like an address, a code or a password even if the attribute ever
+appears on one by mistake. Cookies are left out of the stored header set for the
+same reason, since the session token is among them.
+
+The keystroke gaps are also the honest version of telling a person from a
+script. The same four characters, typed and set:
+
+```
+"test"  8 keys (2 deleting)  over 4.9s  gaps 115 235 129 259 485 205 156 ms (median 205ms)
+"test"  0 keys  FILLED WITHOUT TYPING   over 5.8s
+```
 
 The caps are in `src/tracking.js`: 200 events per batch, 2000 page views and
 5000 events per visitor. `size` reports what these tables hold alongside the
