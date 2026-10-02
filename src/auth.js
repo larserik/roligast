@@ -207,7 +207,7 @@ function createUser(email) {
 
 // Said once at startup so the setting is never a surprise.
 export function describeSuppression() {
-  if (MODE === "off") return "sign-in suppression: off, marks recorded only";
+  if (MODE === "off") return "sign-in suppression: off, signals recorded only";
   if (MODE === "report") {
     return `sign-in suppression: reporting only, would act on [${TRIGGERS.join(", ")}] - codes still sent`;
   }

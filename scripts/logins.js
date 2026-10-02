@@ -95,7 +95,7 @@ const recent = (limit) =>
               CASE WHEN ${OLD_ROW} THEN '?'
                    WHEN referer IS NULL THEN 'NO' ELSE 'yes' END AS referer,
               CASE WHEN ${QUOTED_UA} THEN 'quoted' ELSE '' END AS ua,
-              COALESCE(signals, '') AS marks,
+              COALESCE(signals, '') AS signals,
               detail
        FROM login_events ORDER BY id DESC LIMIT ?`
     )
@@ -382,7 +382,7 @@ const commands = {
     );
   },
 
-  // The point of reporting rather than acting: counting how often each mark
+  // The point of reporting rather than acting: counting how often each signal
   // would have refused a code to someone who turned out to be real.
   signals() {
     const n = days(30);
@@ -412,14 +412,14 @@ const commands = {
     for (const row of rows) {
       const present = row.signals ? row.signals.split(",") : [];
       for (const name of present) tally(name, row, perSignal);
-      tally(present.length ? present.join(",") : "(no marks)", row, perSet);
+      tally(present.length ? present.join(",") : "(none)", row, perSet);
     }
 
     const render = (bucket) =>
       Object.entries(bucket)
         .sort((a, b) => b[1].requests - a[1].requests)
         .map(([name, v]) => ({
-          [bucket === perSignal ? "mark" : "marks present"]: name,
+          [bucket === perSignal ? "signal" : "signals present"]: name,
           requests: v.requests,
           addresses: v.addresses.size,
           // The column that decides it. Anything above zero is a real person
@@ -427,13 +427,13 @@ const commands = {
           of_those_real: v.real.size,
         }));
 
-    heading(`Each mark on its own, ${window(n)}`);
+    heading(`Each signal on its own, ${window(n)}`);
     show(render(perSignal), "no sign-in requests in that window");
-    heading(`The marks as they actually came, ${window(n)}`);
+    heading(`The signals as they actually came, ${window(n)}`);
     show(render(perSet));
     console.log(
       "  of_those_real counts addresses that have completed a sign-in at some point.\n" +
-        "  A mark is safe to act on while that column is zero."
+        "  A signal is safe to act on while that column is zero."
     );
 
     const acted = db
@@ -736,7 +736,7 @@ Reads the sign-in log in ${dbPath}
   daily [days]         day by day, for spotting a burst (default 30)
   full [n]             every column for the last n events (default 30)
   show <id>            one event, every field, nothing truncated
-  signals [days]       each mark, and how many real people it would have caught
+  signals [days]       each signal, and how many real people it would have caught
   bots [days]          Tor exits, quoted user agents, missing cookie or referer
   networks [days]      how much came over Tor rather than an ordinary line
   recent [n]           the last n events (default 50)

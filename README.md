@@ -205,10 +205,10 @@ sign-in log. They grow faster than it does, so they are the ones to watch.
 
 ## Marks on a sign-in request
 
-Every request for a code is measured against four marks and the result is kept
+Every request for a code is measured against four signals and the result is kept
 in `login_events.signals`:
 
-| mark | what it means | what else it would catch |
+| signal | what it means | what else it would catch |
 | --- | --- | --- |
 | `quoted_ua` | the `User-Agent` is wrapped in literal double quotes | nothing a browser does; someone hand-editing their own user agent could leave the quotes in |
 | `ua_mismatch` | the `User-Agent` and `sec-ch-ua` disagree about the platform or the version, or it claims Chrome while listing only Chromium | a user-agent spoofing extension, or a proxy that rewrites the header |
@@ -220,13 +220,13 @@ in `login_events.signals`:
 ```
 
 The column that matters is `of_those_real` - how many addresses carrying that
-mark have ever completed a sign-in. **A mark is safe to act on while that reads
+signal have ever completed a sign-in. **A signal is safe to act on while that reads
 zero**, and not before.
 
-`SUPPRESS_SIGNINS` decides what happens: `off` records the marks and nothing
+`SUPPRESS_SIGNINS` decides what happens: `off` records the signals and nothing
 else, `report` also notes what it would have withheld and sends the code anyway,
 `on` withholds it. It ships as `report`, so deploying changes nothing.
-`SUPPRESS_ON` lists which marks would act, and `tor` is refused there on purpose.
+`SUPPRESS_ON` lists which signals would act, and `tor` is refused there on purpose.
 
 Two things hold whatever the setting:
 

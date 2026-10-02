@@ -1,9 +1,9 @@
 // Marks on a sign-in request: things that are true of it, recorded whether or
 // not anything is done about them. Nothing here decides anything on its own -
-// what, if anything, a mark leads to is settled in requestPin, and for now the
+// what, if anything, a signal leads to is settled in requestPin, and for now the
 // answer is nothing.
 
-// What each mark would also be true of, for a real person:
+// What each signal would also be true of, for a real person:
 //
 //   quoted_ua    nothing I can construct. No browser wraps the header in
 //                quotes. Someone editing their own user agent by hand could
@@ -59,7 +59,7 @@ export function uaMismatch(ua, brands, platformHint) {
 // unless they left very quickly, which is why one page view is not enough.
 export const noJs = (pageViews, events) => pageViews >= 2 && events === 0;
 
-// Returns the marks that apply, as a sorted list.
+// Returns the signals that apply, as a sorted list.
 export function detectSignals({
   userAgent,
   brands,
@@ -77,7 +77,7 @@ export function detectSignals({
 }
 
 // --- what is done about them -----------------------------------------------
-// off     the marks are recorded and never looked at again
+// off     the signals are recorded and never looked at again
 // report  a request that would be refused a code is noted as such, and the code
 //         is sent anyway. This is the default, so deploying changes nothing.
 // on      no code is sent, and nothing else about the response changes
@@ -92,7 +92,7 @@ export const TRIGGERS = String(process.env.SUPPRESS_ON || "quoted_ua")
   .map((name) => name.trim())
   .filter((name) => SIGNALS.includes(name) && name !== "tor");
 
-// An address with an account behind it is never refused, whatever the marks
+// An address with an account behind it is never refused, whatever the signals
 // say. Being silently unable to sign in is the worst thing this could do, and
 // it must not happen to someone who has signed in before.
 export function decide(signals, { hasAccount }) {
