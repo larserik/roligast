@@ -56,6 +56,28 @@ app.use(
   express.static(path.join(__dirname, "public"), { maxAge: "1y" })
 );
 
+// --- One hostname ----------------------------------------------------------
+// A cookie with no Domain belongs to the host that set it, so a session on
+// roligast.com means nothing on www.roligast.com - two sites, two sign-ins, and
+// every page at two addresses. One of them has to win, and the other sends
+// people to it.
+//
+// Empty means do nothing, which is what browsing the container by address
+// needs. Set it in production only.
+const CANONICAL_HOST = (process.env.CANONICAL_HOST || "").trim().toLowerCase();
+
+app.use((req, res, next) => {
+  // The health check arrives as http://roligast:3000/healthz from inside the
+  // docker network, and must not be sent anywhere.
+  if (!CANONICAL_HOST || req.path === "/healthz") return next();
+  const host = (req.hostname || "").toLowerCase();
+  if (!host || host === CANONICAL_HOST) return next();
+  // 301 for a page, 308 for anything carrying a body: a 301 turns a POST into a
+  // GET and the body is thrown away on the way.
+  const permanent = req.method === "GET" || req.method === "HEAD" ? 301 : 308;
+  return res.redirect(permanent, `https://${CANONICAL_HOST}${req.originalUrl}`);
+});
+
 app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 app.use(cookieParser());
 
@@ -692,6 +714,11 @@ app.use((err, req, res, next) => {
 // The Tor exit list loads in the background and refreshes through the day.
 startNetworkLookups();
 console.log(`[auth] ${describeSuppression()}`);
+console.log(
+  CANONICAL_HOST
+    ? `[host] everything redirects to https://${CANONICAL_HOST}`
+    : "[host] no canonical host set, every hostname served as-is"
+);
 
 // Expired sessions and unused codes are cleared at start and once a day after.
 pruneExpired();

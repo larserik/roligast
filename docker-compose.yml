@@ -29,6 +29,9 @@ services:
       # sends the code anyway, which is what it ships as.
       SUPPRESS_SIGNINS: ${SUPPRESS_SIGNINS:-report}
       SUPPRESS_ON: ${SUPPRESS_ON:-quoted_ua}
+      # The one hostname the site answers on; anything else redirects to it.
+      # Leave empty to serve whatever hostname a request arrives with.
+      CANONICAL_HOST: ${CANONICAL_HOST:-}
     volumes:
       - roligast-data:/data
 
