@@ -95,7 +95,8 @@ const recent = (limit) =>
               CASE WHEN ${OLD_ROW} THEN '?'
                    WHEN referer IS NULL THEN 'NO' ELSE 'yes' END AS referer,
               CASE WHEN ${QUOTED_UA} THEN 'quoted' ELSE '' END AS ua,
-              COALESCE(signals, '') AS signals,
+              CASE WHEN signals IS NULL THEN '?'
+                   WHEN signals = '' THEN '-' ELSE signals END AS signals,
               detail
        FROM login_events ORDER BY id DESC LIMIT ?`
     )
@@ -386,13 +387,22 @@ const commands = {
   // would have refused a code to someone who turned out to be real.
   signals() {
     const n = days(30);
+    // Rows whose signals were never worked out are left out rather than
+    // counted as clean - they predate the feature and say nothing either way.
     const rows = db
       .prepare(
-        `SELECT email, COALESCE(signals, '') AS signals
-         FROM login_events
-         WHERE event = 'requested' AND created_at > ${since(n)}`
+        `SELECT email, signals FROM login_events
+         WHERE event = 'requested' AND signals IS NOT NULL
+           AND created_at > ${since(n)}`
       )
       .all();
+    const unexamined = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM login_events
+         WHERE event = 'requested' AND signals IS NULL
+           AND created_at > ${since(n)}`
+      )
+      .get().n;
     const real = new Set(
       db
         .prepare("SELECT DISTINCT email FROM login_events WHERE event = 'verified'")
@@ -428,7 +438,12 @@ const commands = {
         }));
 
     heading(`Each signal on its own, ${window(n)}`);
-    show(render(perSignal), "no sign-in requests in that window");
+    show(render(perSignal), "nothing carried a signal");
+    if (unexamined) {
+      console.log(
+        `  (${unexamined} earlier requests are left out: they predate the signals and were never examined.)`
+      );
+    }
     heading(`The signals as they actually came, ${window(n)}`);
     show(render(perSet));
     console.log(
@@ -611,7 +626,8 @@ const commands = {
                   NULL AS status, NULL AS duration_ms, NULL AS referer,
                   event AS type, email AS target,
                   COALESCE(detail, '') ||
-                    CASE WHEN signals IS NULL THEN '' ELSE '  [' || signals || ']' END AS detail,
+                    CASE WHEN signals IS NULL OR signals = '' THEN ''
+                         ELSE '  [' || signals || ']' END AS detail,
                   NULL AS at_ms
            FROM login_events WHERE visitor_id = ?`
         )

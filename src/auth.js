@@ -52,9 +52,12 @@ export function recordLoginEvent(email, event, context = {}, detail = null) {
           : 0,
       isTorExit(context.ip) ? "tor" : null,
       context.visitorId || null,
-      Array.isArray(context.signals) && context.signals.length
-        ? context.signals.join(",")
-        : null
+      // An empty string means the signals were worked out and none applied.
+      // NULL means they were never worked out, which is true of every row
+      // written before they existed. Storing both as NULL would make a clean
+      // request indistinguishable from an unexamined one, and the counting
+      // that decides whether a signal is safe would be wrong.
+      Array.isArray(context.signals) ? context.signals.join(",") : null
     );
     id = result.lastInsertRowid;
   } catch (err) {
