@@ -422,6 +422,39 @@ const commands = {
 
   // The point of reporting rather than acting: counting how often each signal
   // would have refused a code to someone who turned out to be real.
+  // How long a sign-in POST took, split by what came of it. A withheld code
+  // should take about as long as a sent one, or the difference is measurable
+  // from outside - which is the one thing the waiting in requestPin is for.
+  timing() {
+    const n = days(30);
+    heading(`How long POST /login took, ${window(n)}`);
+    show(
+      db
+        .prepare(
+          `SELECT COALESCE(e.event, 'nothing sent') AS outcome,
+                  COUNT(*) AS n,
+                  MIN(p.duration_ms) AS fastest,
+                  ROUND(AVG(p.duration_ms)) AS average,
+                  MAX(p.duration_ms) AS slowest
+           FROM page_views p
+           LEFT JOIN login_events e
+             ON e.visitor_id = p.visitor_id
+            AND e.event IN ('sent', 'suppressed', 'send_failed')
+            AND abs(julianday(e.created_at) - julianday(p.created_at)) * 86400 < 2
+           WHERE p.path = '/login' AND p.method = 'POST'
+             AND p.created_at > ${since(n)}
+           GROUP BY outcome ORDER BY n DESC`
+        )
+        .all(),
+      "no sign-in posts in that window"
+    );
+    console.log(
+      "  sent and suppressed should sit close together. Far apart and the\n" +
+        "  difference is measurable from outside; tell me the numbers and the\n" +
+        "  wait in requestPin gets retuned."
+    );
+  },
+
   signals() {
     const n = days(30);
     // Rows whose signals were never worked out are left out rather than
@@ -790,6 +823,7 @@ Reads the sign-in log in ${dbPath}
   full [n]             every column for the last n events (default 30)
   show <id>            one event, every field, nothing truncated
   signals [days]       each signal, and how many real people it would have caught
+  timing [days]        how long a sign-in post took, by what came of it
   bots [days]          Tor exits, quoted user agents, missing cookie or referer
   networks [days]      how much came over Tor rather than an ordinary line
   recent [n]           the last n events (default 50)
