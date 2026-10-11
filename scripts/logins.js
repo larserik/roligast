@@ -156,18 +156,40 @@ const byIp = (n) =>
     .all();
 
 // The shape abuse takes: a code goes out and nobody ever uses it.
+const codesSent = (n) =>
+  db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM login_events
+       WHERE event = 'sent' AND created_at > ${since(n)}`
+    )
+    .get().n;
+
+// An empty result here means either that every code was used or that no code
+// was ever sent, and those are opposite things. Suppression makes the second
+// one the normal case, so the message has to say which.
+const noUnverified = (n) =>
+  codesSent(n) === 0
+    ? "nobody asked for a code, or everyone who asked signed in"
+    : "none - everyone who asked for a code signed in";
+
+// Counted on asks rather than sends. A view built on sends goes blind the
+// moment suppression is switched on, which is exactly when it is most wanted:
+// an address asked for ten times and refused ten times is the thing to see.
 const unverified = (n) =>
   db
     .prepare(
       `SELECT email,
-              COUNT(*) AS codes_sent,
+              SUM(event = 'requested') AS times_asked,
+              SUM(event = 'sent') AS codes_sent,
+              SUM(event = 'suppressed') AS withheld,
               COUNT(DISTINCT ip) AS from_ips,
               GROUP_CONCAT(DISTINCT ip) AS ips,
-              MAX(created_at) AS last_sent
+              MAX(created_at) AS last_asked
        FROM login_events
-       WHERE event = 'sent' AND created_at > ${since(n)}
+       WHERE event IN ('requested', 'sent', 'suppressed')
+         AND created_at > ${since(n)}
          AND email NOT IN (SELECT email FROM login_events WHERE event = 'verified')
-       GROUP BY email ORDER BY codes_sent DESC, last_sent DESC`
+       GROUP BY email ORDER BY times_asked DESC, last_asked DESC`
     )
     .all();
 
@@ -364,8 +386,8 @@ const commands = {
     show(byIp(n));
     heading(`Looks automated, ${window(n)}`);
     show(automated(n), "nothing - every request carried a cookie and a referer");
-    heading(`Sent a code and never signed in, ${window(n)}`);
-    show(unverified(n), "none - every code that went out was used");
+    heading(`Asked for a code and never signed in, ${window(n)}`);
+    show(unverified(n), noUnverified(n));
     heading("The last 15 events");
     show(recent(15));
   },
@@ -552,8 +574,8 @@ const commands = {
 
   unverified() {
     const n = days(30);
-    heading(`Sent a code and never signed in, ${window(n)}`);
-    show(unverified(n), "none - every code that went out was used");
+    heading(`Asked for a code and never signed in, ${window(n)}`);
+    show(unverified(n), noUnverified(n));
   },
 
   summary() {
@@ -818,7 +840,7 @@ Reads the sign-in log in ${dbPath}
   overview [days]      everything below at a glance (default, 7 days)
   summary [days]       counts per event type
   ips [days]           where the traffic came from
-  unverified [days]    addresses sent a code that never signed in (default 30)
+  unverified [days]    addresses that asked for a code and never signed in
   daily [days]         day by day, for spotting a burst (default 30)
   full [n]             every column for the last n events (default 30)
   show <id>            one event, every field, nothing truncated

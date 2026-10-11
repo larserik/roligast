@@ -16,7 +16,7 @@ that anyone can add and anyone can rate from 1 to 10.
 ## Running it
 
 ```sh
-cp .env-example .env      # SMTP details for the sign-in codes
+cp .env.example .env      # SMTP details for the sign-in codes
 docker compose up -d --build
 ```
 
@@ -243,7 +243,7 @@ Two things hold whatever the setting:
 ## Notes
 
 - The real SMTP password lives only in `.env`, which `.gitignore` keeps out of
-  the repo. `.env-example` has an empty `SMTP_PASS` on purpose - keep it that
+  the repo. `.env.example` has an empty `SMTP_PASS` on purpose - keep it that
   way.
 - Posts and ratings are not moderated. Since anyone can post, the only limit is
   ten posts per hour per visitor.
