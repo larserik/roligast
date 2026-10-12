@@ -5,7 +5,7 @@
     <p class="footer-links">
       <a href="/"><%= t("back_home") %></a>
       <a href="/add"><%= t("footer_add") %></a>
-      <a href="/lang/<%= otherLang %>?next=<%= encodeURIComponent(currentUrl) %>" lang="<%= otherLang %>"><%= t("lang_other") %></a>
+      <a rel="nofollow" href="/lang/<%= otherLang %>?next=<%= encodeURIComponent(currentUrl) %>" lang="<%= otherLang %>"><%= t("lang_other") %></a>
     </p>
   </div>
 </footer>

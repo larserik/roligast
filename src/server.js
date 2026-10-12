@@ -150,7 +150,7 @@ app.use((req, res, next) => {
 // --- What the visitor did --------------------------------------------------
 // Static files are served before any of this, so they never reach it. These
 // three are machine traffic of one sort or another and would only be noise.
-const UNTRACKED = new Set(["/healthz", "/robots.txt", "/_e"]);
+const UNTRACKED = new Set(["/healthz", "/robots.txt", "/sitemap.xml", "/_e"]);
 
 app.use((req, res, next) => {
   if (UNTRACKED.has(req.path)) return next();
@@ -239,6 +239,31 @@ app.use((req, res, next) => {
   res.locals.loginHref = AUTH_PATHS.has(req.path)
     ? "/login"
     : "/login?next=" + encodeURIComponent(req.originalUrl);
+
+  // --- what search engines should make of this page ---
+  // Pages that exist to get someone in or to show them their own things are
+  // not pages to put in an index. They say so themselves rather than being
+  // hidden in robots.txt: a disallowed page cannot be read, so a crawler that
+  // already knows the address lists it anyway, with nothing to go on and no
+  // way ever to learn it should stop.
+  res.locals.noindex = NOINDEX_PATHS.has(req.path);
+
+  // One address per page, on the one hostname. Sorting is dropped because the
+  // same posts in another order is the same page; the kind filter and the page
+  // number are kept because they genuinely show something else.
+  if (CANONICAL_HOST && !res.locals.noindex) {
+    const keep = new URLSearchParams();
+    if (req.path === "/") {
+      if (KINDS.includes(req.query.kind)) keep.set("kind", req.query.kind);
+      const page = Number(req.query.page);
+      if (Number.isFinite(page) && page > 1) keep.set("page", String(page));
+    }
+    const query = keep.toString();
+    res.locals.canonicalUrl =
+      `https://${CANONICAL_HOST}${req.path}` + (query ? `?${query}` : "");
+  } else {
+    res.locals.canonicalUrl = null;
+  }
   next();
 });
 
@@ -266,6 +291,9 @@ const loginContext = (req) => {
 // Pages that exist to get someone signed in. Coming back to one of them after
 // signing in is never what was wanted.
 const AUTH_PATHS = new Set(["/login", "/verify", "/logout"]);
+
+// Pages that should never appear in a search result.
+const NOINDEX_PATHS = new Set(["/login", "/verify", "/logout", "/me"]);
 
 // Only allows redirects back into this site. A browser reads "//evil.se" and
 // "/\evil.se" as absolute URLs, so a plain leading slash is not enough.
@@ -689,13 +717,66 @@ app.post("/me", requireUser, (req, res) => {
 // --- Odds and ends ---------------------------------------------------------
 app.get("/healthz", (req, res) => res.type("text").send("ok"));
 
-// Signing in is not something to index, and neither is the language switch,
-// which exists only to set a cookie and send the visitor back.
+// Only the language switch is disallowed here, and only because it is a
+// redirect: it renders no page, so it has nowhere to carry a noindex and
+// robots.txt is the only thing that can keep a crawler off it.
+//
+// The sign-in pages are deliberately NOT disallowed. Disallow stops a crawler
+// reading a page; it does not stop it listing an address it already knows, and
+// Search Console reports exactly that as "indexed, though blocked by
+// robots.txt". They carry a noindex instead, which a crawler has to be allowed
+// in to read before it can obey.
+// The other half of the same job: robots.txt says what not to look at, this
+// says what there is. Posts are the content worth finding; the listing
+// orderings and the sign-in pages are not in here.
+const SITEMAP_MAX = 5000;
+const xmlEscape = (value) =>
+  String(value).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]
+  );
+
+app.get("/sitemap.xml", (req, res) => {
+  if (!CANONICAL_HOST) return res.status(404).type("text").send("no canonical host set");
+  const origin = `https://${CANONICAL_HOST}`;
+  const posts = db
+    .prepare(
+      `SELECT public_id, created_at FROM posts ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(SITEMAP_MAX);
+
+  const entry = (loc, lastmod) =>
+    `  <url><loc>${xmlEscape(loc)}</loc>` +
+    (lastmod ? `<lastmod>${xmlEscape(lastmod)}</lastmod>` : "") +
+    "</url>";
+
+  res.type("application/xml").send(
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      entry(`${origin}/`, posts[0]?.created_at.slice(0, 10)),
+      entry(`${origin}/add`),
+      ...posts.map((post) =>
+        entry(`${origin}/p/${post.public_id}`, post.created_at.slice(0, 10))
+      ),
+      "</urlset>",
+      "",
+    ].join("\n")
+  );
+});
+
 app.get("/robots.txt", (req, res) =>
   res
     .type("text")
     .send(
-      ["User-agent: *", "Disallow: /login", "Disallow: /verify", "Disallow: /lang/", ""].join("\n")
+      [
+        "User-agent: *",
+        "Disallow: /lang/",
+        "Disallow: /_e",
+        "",
+        CANONICAL_HOST ? `Sitemap: https://${CANONICAL_HOST}/sitemap.xml` : "",
+      ]
+        .filter((line, i, all) => line !== "" || i < all.length - 1)
+        .join("\n") + "\n"
     )
 );
 

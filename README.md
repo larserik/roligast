@@ -240,6 +240,30 @@ Two things hold whatever the setting:
   194-325ms and one that sends nothing takes two, and that gap is the one thing
   measurable from outside.
 
+## What search engines see
+
+Every page declares its own address on the canonical hostname, so the same page
+reached a second way does not read as a second page. Sorting is left out of that
+address - the same posts in another order is the same page - while the kind
+filter and the page number are kept, because those genuinely show something
+else.
+
+The sign-in pages carry `<meta name="robots" content="noindex, follow">` and are
+**not** disallowed in `robots.txt`. That distinction matters and is easy to get
+backwards: `Disallow` stops a crawler reading a page, not listing an address it
+already knows from a link. Disallowing a page Google has already seen leaves it
+in the index with nothing to show and no way for Google ever to learn it should
+go - which Search Console reports as "indexed, though blocked by robots.txt".
+A noindex has to be *read* to be obeyed, so the page has to stay crawlable.
+
+`/lang/` is disallowed, because it is only a redirect: it renders no page, so
+there is nowhere to put a noindex and robots.txt is the only thing that reaches
+it. Its links are marked `rel="nofollow"` as well.
+
+`/sitemap.xml` lists the front page and every post, newest first, and
+`robots.txt` points at it. Both appear only when `CANONICAL_HOST` is set, since
+neither can name a page without knowing the hostname.
+
 ## Notes
 
 - The real SMTP password lives only in `.env`, which `.gitignore` keeps out of
