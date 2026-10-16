@@ -228,13 +228,21 @@ const automated = (n) =>
               SUM(has_visitor_cookie = 0) AS no_cookie,
               SUM(has_visitor_cookie IS NOT NULL AND referer IS NULL) AS no_referer,
               SUM(${QUOTED_UA}) AS quoted_ua,
+              SUM(signals LIKE '%no_js%') AS no_js,
+              MAX(COALESCE(signals, '')) AS signals,
               MAX(accept_language) AS accept_language,
               MAX(user_agent) AS user_agent
        FROM login_events
        WHERE created_at > ${since(n)}
-         AND (network = 'tor' OR ${QUOTED_UA}
-              OR has_visitor_cookie = 0
-              OR (has_visitor_cookie IS NOT NULL AND referer IS NULL))
+         AND (
+           -- Anything the signals caught. This view predated them and tested
+           -- its own conditions, which missed a visitor that carried a cookie
+           -- and a referer and simply never ran the page - the most persistent
+           -- automated caller of the week was invisible here.
+           (signals IS NOT NULL AND signals != '')
+           -- Rows older than the signals still answer on what they do have.
+           OR (${OLD_ROW} AND (${QUOTED_UA} OR referer IS NULL))
+         )
        GROUP BY ip ORDER BY events DESC`
     )
     .all();
@@ -384,8 +392,8 @@ const commands = {
     show(networks(n));
     heading(`Where it came from, ${window(n)}`);
     show(byIp(n));
-    heading(`Looks automated, ${window(n)}`);
-    show(automated(n), "nothing - every request carried a cookie and a referer");
+    heading(`Carried a signal, ${window(n)}`);
+    show(automated(n), "nothing carried a signal");
     heading(`Asked for a code and never signed in, ${window(n)}`);
     show(unverified(n), noUnverified(n));
     heading("The last 15 events");
@@ -559,8 +567,8 @@ const commands = {
 
   bots() {
     const n = days(30);
-    heading(`Tor, or no cookie, or no referer - ${window(n)}`);
-    show(automated(n), "nothing - every request looked like a browser");
+    heading(`Carried a signal, ${window(n)}`);
+    show(automated(n), "nothing carried a signal");
     console.log(
       "  no_cookie counts requests that never loaded a page on this site first."
     );
@@ -617,6 +625,57 @@ const commands = {
            FROM login_events WHERE ip = ? ORDER BY id`
         )
         .all(address)
+    );
+  },
+
+  // What is generating the page views, and who. The journey tables grow far
+  // faster than the sign-in log, so when they do this answers why.
+  paths() {
+    const n = days(7);
+    const win = `WHERE p.created_at > ${since(n)}`;
+
+    heading(`Which routes, ${window(n)}`);
+    show(
+      db
+        .prepare(
+          `SELECT CASE WHEN instr(p.path, '?') > 0
+                       THEN substr(p.path, 1, instr(p.path, '?') - 1)
+                       ELSE p.path END AS route,
+                  COUNT(*) AS views,
+                  COUNT(DISTINCT p.visitor_id) AS visitors,
+                  COUNT(DISTINCT p.path) AS distinct_urls
+           FROM page_views p ${win}
+           GROUP BY route ORDER BY views DESC LIMIT 20`
+        )
+        .all(),
+      "no page views in that window"
+    );
+
+    heading(`Busiest single addresses, ${window(n)}`);
+    show(
+      db
+        .prepare(
+          `SELECT substr(p.path, 1, 70) AS url, COUNT(*) AS views
+           FROM page_views p ${win}
+           GROUP BY p.path ORDER BY views DESC LIMIT 15`
+        )
+        .all()
+    );
+
+    heading(`Who is asking, ${window(n)}`);
+    show(
+      db
+        .prepare(
+          `SELECT COALESCE(substr(v.user_agent, 1, 58), '(none)') AS user_agent,
+                  COUNT(*) AS views,
+                  COUNT(DISTINCT p.visitor_id) AS visitors,
+                  COUNT(DISTINCT v.ip) AS ips
+           FROM page_views p
+           LEFT JOIN visitors v ON v.id = p.visitor_id ${win}
+           GROUP BY COALESCE(substr(v.user_agent, 1, 58), '(none)')
+           ORDER BY views DESC LIMIT 20`
+        )
+        .all()
     );
   },
 
@@ -846,11 +905,12 @@ Reads the sign-in log in ${dbPath}
   show <id>            one event, every field, nothing truncated
   signals [days]       each signal, and how many real people it would have caught
   timing [days]        how long a sign-in post took, by what came of it
-  bots [days]          Tor exits, quoted user agents, missing cookie or referer
+  bots [days]          every request that carried any signal, grouped by address
   networks [days]      how much came over Tor rather than an ordinary line
   recent [n]           the last n events (default 50)
   email <address>      everything recorded for one address
   ip <address>         everything recorded from one client address
+  paths [days]         what is generating the page views, and who (default 7)
   visitors [n]         everyone who loaded a page, newest first
   journey <visitor>    one visitor: how they arrived, their headers, every step
   users                accounts, with their posts, ratings and live sessions
