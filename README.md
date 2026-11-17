@@ -199,6 +199,20 @@ script. The same four characters, typed and set:
 "test"  0 keys  FILLED WITHOUT TYPING   over 5.8s
 ```
 
+**Everything is recorded, 404s included** - the visitor, the page view, the
+landing page, whether that landing page existed or not. Most traffic to a public
+site is somebody scanning for a hole in software it does not run (`/.env`,
+`/.git/config`, `/api/proc/self/environ` and several hundred more) and on this
+one that is the great majority of every page view, but it is cheap enough to
+keep and `logins.sh scans` reads it back out in aggregate. If it ever stops being
+cheap, pruning old rows is the answer rather than declining to write them.
+
+`visitors.assets` counts the static files a browser fetched. A page pulls four, a
+script pulls none, and unlike the beacon this needs no JavaScript - which matters
+here, where 76 of 9,081 visitors have ever run any. It proves something rendered
+the page, not that a person did: a headless browser fetches them too, and a
+client that keeps no cookie is not counted at all.
+
 The caps are in `src/tracking.js`: 200 events per batch, 2000 page views and
 5000 events per visitor. `size` reports what these tables hold alongside the
 sign-in log. They grow faster than it does, so they are the ones to watch.

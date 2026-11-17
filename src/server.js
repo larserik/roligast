@@ -15,6 +15,7 @@ import {
   recordEvents,
   linkVisitorToUser,
   countsFor,
+  noteAsset,
 } from "./tracking.js";
 import { detectSignals } from "./signals.js";
 import { isTorExit } from "./network.js";
@@ -41,6 +42,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
+app.use(cookieParser());
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 // The reverse proxy in front of this terminates TLS, so the real protocol and
@@ -51,6 +53,15 @@ app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
 // Static files first, so serving them costs no session lookup or database work.
+// The one thing noted about them is that they were asked for at all: a browser
+// pulls four files for every page, a scanner pulls none, and unlike the beacon
+// this works with JavaScript switched off. It is one update of a row that
+// already exists, never an insert.
+app.use("/static", (req, res, next) => {
+  const id = req.cookies?.[VISITOR_COOKIE];
+  if (/^[0-9a-f]{32}$/.test(id || "")) noteAsset(id);
+  next();
+});
 app.use(
   "/static",
   express.static(path.join(__dirname, "public"), { maxAge: "1y" })
@@ -79,7 +90,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.urlencoded({ extended: false, limit: "64kb" }));
-app.use(cookieParser());
 
 // Static files are cached hard, so their URLs carry a hash of the contents.
 // Without it a deploy leaves visitors on the previous stylesheet until their
@@ -155,6 +165,9 @@ const UNTRACKED = new Set(["/healthz", "/robots.txt", "/sitemap.xml", "/_e"]);
 app.use((req, res, next) => {
   if (UNTRACKED.has(req.path)) return next();
   const startedAt = process.hrtime.bigint();
+  // The visitor row is written before the route runs, as it always was: the
+  // first address someone asks for is their landing page whether it exists or
+  // not, and a beacon arriving later has a row to belong to.
   noteVisitor(req);
   res.on("finish", () => notePageView(req, res, startedAt));
   next();

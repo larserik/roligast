@@ -38,6 +38,19 @@ const touchVisitor = db.prepare(
 const setVisitorRdns = db.prepare(
   "UPDATE visitors SET rdns = ? WHERE id = ? AND rdns IS NULL"
 );
+// One update, never an insert: if there is no row yet there is nothing to count
+// against, and the page that pulled the file will have made one.
+const bumpAssets = db.prepare(
+  "UPDATE visitors SET assets = assets + 1 WHERE id = ?"
+);
+export function noteAsset(visitorId) {
+  try {
+    bumpAssets.run(visitorId);
+  } catch (err) {
+    console.error("[tracking] asset", err.message);
+  }
+}
+
 const setVisitorUser = db.prepare(
   "UPDATE visitors SET user_id = ? WHERE id = ? AND user_id IS NULL"
 );

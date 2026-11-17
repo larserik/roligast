@@ -166,6 +166,10 @@ function ensureColumns(table, columns) {
 
 // login_events gains the visitor so a sign-in attempt joins to the journey
 // that led to it.
+// How many static files this browser has fetched. A page pulls four; a scanner
+// pulls none. Unlike the beacon it needs no JavaScript.
+ensureColumns("visitors", { assets: "INTEGER NOT NULL DEFAULT 0" });
+
 ensureColumns("login_events", {
   visitor_id: "TEXT",
   signals: "TEXT",

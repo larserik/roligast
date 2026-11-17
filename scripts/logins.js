@@ -230,8 +230,16 @@ const automated = (n) =>
               SUM(${QUOTED_UA}) AS quoted_ua,
               SUM(signals LIKE '%no_js%') AS no_js,
               MAX(COALESCE(signals, '')) AS signals,
+              COUNT(DISTINCT user_agent) AS agents,
               MAX(accept_language) AS accept_language,
-              MAX(user_agent) AS user_agent
+              -- Not MAX(): over strings that picks whichever sorts highest,
+              -- which is nobody in particular, and an address that has served
+              -- several would read as a different crawler week to week. The
+              -- newest is at least a real answer, and the agents count says
+              -- when to distrust it.
+              substr((SELECT e2.user_agent FROM login_events e2
+                      WHERE e2.ip = login_events.ip
+                      ORDER BY e2.id DESC LIMIT 1), 1, 70) AS newest_user_agent
        FROM login_events
        WHERE created_at > ${since(n)}
          AND (
@@ -634,6 +642,20 @@ const commands = {
     const n = days(7);
     const win = `WHERE p.created_at > ${since(n)}`;
 
+    const split = db
+      .prepare(
+        `SELECT SUM(status = 404) AS not_found, COUNT(*) AS total
+         FROM page_views p ${win}`
+      )
+      .get();
+    if (split.total) {
+      console.log(
+        `\n  ${split.not_found} of ${split.total} page views (${Math.round(
+          (split.not_found / split.total) * 100
+        )}%) were for addresses that do not exist.`
+      );
+    }
+
     heading(`Which routes, ${window(n)}`);
     show(
       db
@@ -643,7 +665,8 @@ const commands = {
                        ELSE p.path END AS route,
                   COUNT(*) AS views,
                   COUNT(DISTINCT p.visitor_id) AS visitors,
-                  COUNT(DISTINCT p.path) AS distinct_urls
+                  COUNT(DISTINCT p.path) AS distinct_urls,
+                  SUM(p.status = 404) AS not_found
            FROM page_views p ${win}
            GROUP BY route ORDER BY views DESC LIMIT 20`
         )
@@ -662,6 +685,28 @@ const commands = {
         .all()
     );
 
+    // The visitor row is written on any request that finds a page, so a client
+    // that asks for real pages as well as imaginary ones keeps its row and its
+    // 404s join back to it. Only a browser that never once reached a page has
+    // nothing to tie together - and that is exactly what is no longer written.
+    const orphans = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM visitors v
+         WHERE NOT EXISTS (
+           SELECT 1 FROM page_views p
+           WHERE p.visitor_id = v.id AND p.status != 404
+         )`
+      )
+      .get().n;
+    const all = db.prepare("SELECT COUNT(*) AS n FROM visitors").get().n;
+    if (all) {
+      console.log(
+        `\n  ${orphans} of ${all} visitor rows (${Math.round(
+          (orphans / all) * 100
+        )}%) are for browsers that never reached a page.`
+      );
+    }
+
     heading(`Who is asking, ${window(n)}`);
     show(
       db
@@ -676,6 +721,58 @@ const commands = {
            ORDER BY views DESC LIMIT 20`
         )
         .all()
+    );
+  },
+
+  // Requests for addresses that do not exist, read out of the page views.
+  scans() {
+    const n = days(30);
+    const win = `WHERE p.status = 404 AND p.created_at > ${since(n)}`;
+
+    heading(`Scanning, day by day, ${window(n)}`);
+    show(
+      db
+        .prepare(
+          `SELECT date(p.created_at) AS day, COUNT(*) AS requests,
+                  COUNT(DISTINCT p.path) AS distinct_paths,
+                  COUNT(DISTINCT p.visitor_id) AS visitors
+           FROM page_views p ${win}
+           GROUP BY day ORDER BY day DESC LIMIT 30`
+        )
+        .all(),
+      "nothing has asked for an address that does not exist"
+    );
+
+    heading(`What they are looking for, ${window(n)}`);
+    show(
+      db
+        .prepare(
+          `SELECT substr(p.path, 1, 60) AS path, COUNT(*) AS requests,
+                  COUNT(DISTINCT date(p.created_at)) AS days,
+                  MAX(p.created_at) AS last_seen
+           FROM page_views p ${win}
+           GROUP BY p.path ORDER BY requests DESC LIMIT 25`
+        )
+        .all()
+    );
+
+    heading(`Where it comes from, ${window(n)}`);
+    show(
+      db
+        .prepare(
+          `SELECT v.ip, COUNT(*) AS requests,
+                  COUNT(DISTINCT p.visitor_id) AS cookies,
+                  SUM(v.assets) AS assets_fetched,
+                  COUNT(DISTINCT v.user_agent) AS agents,
+              substr(MAX(v.user_agent), 1, 50) AS a_user_agent
+           FROM page_views p JOIN visitors v ON v.id = p.visitor_id ${win}
+           GROUP BY v.ip ORDER BY requests DESC LIMIT 25`
+        )
+        .all()
+    );
+    console.log(
+      "  assets_fetched counts static files pulled: a browser takes four per\n" +
+        "  page, a scanner takes none, and it needs no JavaScript to show."
     );
   },
 
@@ -728,7 +825,8 @@ const commands = {
       browser: visitor.user_agent || "-",
       language: visitor.accept_language || "-",
       "signed in as": visitor.signed_in_as || "-",
-      "pages / events": `${visitor.page_views} / ${visitor.events}`,
+      "pages / files": `${visitor.page_views} / ${visitor.assets ?? 0}`,
+      "browser events": visitor.events,
     };
     for (const [name, value] of Object.entries(facts)) {
       console.log(`  ${name.padEnd(15)} ${value}`);
@@ -911,6 +1009,7 @@ Reads the sign-in log in ${dbPath}
   email <address>      everything recorded for one address
   ip <address>         everything recorded from one client address
   paths [days]         what is generating the page views, and who (default 7)
+  scans [days]         requests for addresses that do not exist, counted
   visitors [n]         everyone who loaded a page, newest first
   journey <visitor>    one visitor: how they arrived, their headers, every step
   users                accounts, with their posts, ratings and live sessions
